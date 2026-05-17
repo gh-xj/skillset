@@ -15,6 +15,9 @@ Status: guarded reconcile slice. Implemented commands are
 go install github.com/gh-xj/skillset/cmd/skillset@latest
 ```
 
+v0.1.0 is distributed through `go install` only. Binary release artifacts are
+deferred until the CLI has a release packaging pipeline.
+
 ## Agent Skill
 
 The `skillset` repo ships an official operator skill for agents that need to
@@ -30,7 +33,7 @@ profile:
 ```yaml
 - name: skillset-operator
   tier: user
-  owner: upstream
+  owner: first_party
   source: github:gh-xj/skillset//skills/skillset-operator
   agents:
     - codex
@@ -38,6 +41,50 @@ profile:
 
 Contributor guidance remains separate in the repo-local
 `.claude/skills/skillset-maintainer/` skill.
+
+## New User Flow
+
+1. Install the CLI:
+
+   ```sh
+   go install github.com/gh-xj/skillset/cmd/skillset@latest
+   ```
+
+2. Install the operator skill for the agent that will manage skill state:
+
+   ```sh
+   npx skills add gh-xj/skillset -g -s skillset-operator -a codex -y --copy
+   ```
+
+3. Generate a draft profile from the current machine:
+
+   ```sh
+   skillset discover --suggested-profile > skills.profile.yaml
+   ```
+
+4. Edit `skills.profile.yaml` so sources are intentional, then check it:
+
+   ```sh
+   skillset validate
+   skillset check
+   skillset diff
+   skillset doctor
+   ```
+
+5. If existing installs should become managed, dry-run first and then record
+   evidence:
+
+   ```sh
+   skillset adopt
+   skillset adopt --apply
+   ```
+
+6. On later changes, dry-run write commands before applying them:
+
+   ```sh
+   skillset apply
+   skillset prune
+   ```
 
 ## Profile Shape
 

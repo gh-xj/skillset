@@ -22,6 +22,27 @@ local evidence for safe pruning.
   as `skillset`-managed and no longer desired by the profile.
 - Always dry-run `adopt`, `apply`, and `prune` before using `--apply`.
 
+## Safe First Commands
+
+Start with read-only inspection. These commands should not write live skill
+roots or `.skillset/` state:
+
+```sh
+skillset validate
+skillset check
+skillset diff
+skillset doctor
+```
+
+If the profile is not in the current directory, pass it explicitly:
+
+```sh
+skillset --profile skills.profile.yaml validate
+skillset --profile skills.profile.yaml check
+skillset --profile skills.profile.yaml diff
+skillset --profile skills.profile.yaml doctor
+```
+
 ## Install The CLI
 
 Check whether the CLI is already available:
