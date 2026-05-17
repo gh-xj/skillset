@@ -1,4 +1,6 @@
 schema_version: 1
+roots:
+  fixtures: .
 skills:
   - name: opencli-browser
     tier: user
@@ -9,7 +11,7 @@ skills:
   - name: skill-builder
     tier: user
     owner: first_party
-    source: local:.//local/skills/skill-builder
+    source: local:fixtures//local/skills/skill-builder
     agents:
       - codex
       - claude-code

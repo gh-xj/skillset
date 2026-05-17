@@ -12,17 +12,17 @@ func (c *NormalizeCmd) Run(globals *CLI) error {
 	if err != nil {
 		if globals.JSON {
 			result := profileError(err)
-			if writeErr := emitJSON(globals.stdout(), validationPayload(path, result)); writeErr != nil {
+			if writeErr := emitValidationCommandJSON(globals.stdout(), "normalize", path, result); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
 		}
 		return err
 	}
-	result := p.Validate()
+	result := p.ValidateForProfile(path)
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(path, result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "normalize", path, result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -31,7 +31,9 @@ func (c *NormalizeCmd) Run(globals *CLI) error {
 		return appctx.NewExitError(appctx.ExitError, "")
 	}
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		return emitCommandJSON(globals.stdout(), "normalize", true, path, nil, map[string]any{
+			"profile": p,
+		}, result.Warnings, result.Errors, map[string]any{
 			"profile_path": path,
 			"profile":      p,
 		})

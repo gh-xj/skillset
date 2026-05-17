@@ -26,6 +26,45 @@ func TestRunDryRunPlansOnlyUndesiredManagedEntries(t *testing.T) {
 	}
 }
 
+func TestRunDryRunPlansManagedEntryWhenSourceChanges(t *testing.T) {
+	env := newPruneEnv(t)
+	desired := env.desiredSkill()
+	desired.Source = "local:.//sources/keep-renamed"
+	plan := env.plan(t, []profile.Skill{desired})
+
+	result, err := Run(plan, Options{ProfilePath: env.profilePath, Now: fixedNow})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Summary.Planned != 2 {
+		t.Fatalf("expected changed source to make previous entry undesired, got %#v", result)
+	}
+}
+
+func TestRunDryRunSkipsManagedEntryWhenLocalSourceSyntaxChanges(t *testing.T) {
+	env := newPruneEnv(t)
+	desired := env.desiredSkill()
+	desired.Source = "local:fixtures//keep"
+	plan := env.planProfile(t, profile.Profile{
+		SchemaVersion: profile.CurrentSchemaVersion,
+		Roots: map[string]string{
+			"fixtures": "sources",
+		},
+		Skills: []profile.Skill{desired},
+	})
+
+	result, err := Run(plan, Options{ProfilePath: env.profilePath, Now: fixedNow})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Summary.Planned != 1 || result.Summary.Skipped != 1 {
+		t.Fatalf("expected source syntax migration to keep desired entry, got %#v", result)
+	}
+	if result.Planned[0].Name != "stale" {
+		t.Fatalf("expected only stale entry to be planned, got %#v", result.Planned)
+	}
+}
+
 func TestRunApplyDeletesOnlyManagedUndesiredEntries(t *testing.T) {
 	env := newPruneEnv(t)
 	plan := env.plan(t, []profile.Skill{env.desiredSkill()})
@@ -48,6 +87,34 @@ func TestRunApplyDeletesOnlyManagedUndesiredEntries(t *testing.T) {
 	}
 	if len(store.Managed) != 1 || store.Managed[0].Name != "keep" {
 		t.Fatalf("expected only desired managed entry, got %#v", store.Managed)
+	}
+}
+
+func TestRunApplyDeletesTargetRelOnlyManagedEntry(t *testing.T) {
+	env := newPruneEnv(t)
+	store, err := state.Load(state.StatePathForProfile(env.profilePath))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for i := range store.Managed {
+		if store.Managed[i].Name == "stale" {
+			store.Managed[i].TargetRel = "stale"
+			store.Managed[i].TargetPath = ""
+		}
+	}
+	if err := state.Save(state.StatePathForProfile(env.profilePath), store); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	result, err := Run(env.plan(t, []profile.Skill{env.desiredSkill()}), Options{Apply: true, ProfilePath: env.profilePath, Now: fixedNow})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Summary.Deleted != 1 {
+		t.Fatalf("expected target_rel-only stale entry deleted, got %#v", result)
+	}
+	if _, err := os.Lstat(env.staleTarget); !os.IsNotExist(err) {
+		t.Fatalf("expected stale target deleted, err=%v", err)
 	}
 }
 
@@ -244,6 +311,11 @@ func writePruneSkill(t *testing.T, dir, name string) {
 func (e pruneEnv) plan(t *testing.T, skills []profile.Skill) planner.Plan {
 	t.Helper()
 	p := profile.Profile{SchemaVersion: profile.CurrentSchemaVersion, Skills: skills}
+	return e.planProfile(t, p)
+}
+
+func (e pruneEnv) planProfile(t *testing.T, p profile.Profile) planner.Plan {
+	t.Helper()
 	plan, err := planner.Build(p, planner.Options{ProfilePath: e.profilePath, HomeDir: e.home, RepoDir: e.repo})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)

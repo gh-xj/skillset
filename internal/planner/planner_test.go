@@ -44,8 +44,43 @@ func TestBuildPlansInstalledAndMissingItems(t *testing.T) {
 	if plan.Summary.Total != 3 || plan.Summary.Present != 1 || plan.Summary.MissingTarget != 1 || plan.Summary.SystemIgnored != 1 {
 		t.Fatalf("unexpected summary: %#v", plan.Summary)
 	}
-	if len(plan.Changes()) != 1 || plan.Changes()[0].Action != ActionInstallGitHub {
-		t.Fatalf("expected one github install change, got %#v", plan.Changes())
+	if len(plan.Creates()) != 1 || plan.Creates()[0].Action != ActionInstallGitHub || len(plan.Changes()) != len(plan.Creates()) {
+		t.Fatalf("expected one github create decision, got changes=%#v creates=%#v", plan.Changes(), plan.Creates())
+	}
+	if len(plan.Ignored()) != 1 || plan.Ignored()[0].Status != StatusSystemIgnored {
+		t.Fatalf("expected one ignored system decision, got %#v", plan.Ignored())
+	}
+}
+
+func TestBuildResolvesNamedLocalRoots(t *testing.T) {
+	env := newPlannerEnv(t)
+	p := profile.Profile{
+		SchemaVersion: profile.CurrentSchemaVersion,
+		Roots: map[string]string{
+			"fixtures": "sources",
+		},
+		Skills: []profile.Skill{{
+			Name:   "local-skill",
+			Tier:   profile.TierUser,
+			Owner:  profile.OwnerPrivate,
+			Source: "local:fixtures//local-skill",
+			Agents: []profile.Agent{profile.AgentCodex},
+		}},
+	}
+
+	plan, err := Build(p, Options{ProfilePath: env.profilePath, HomeDir: env.home, RepoDir: env.repo})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if plan.Summary.Present != 1 {
+		t.Fatalf("expected named-root local skill to be present, got summary=%#v item=%#v", plan.Summary, plan.Items)
+	}
+	if got, want := plan.Items[0].SourcePath, filepath.Join(env.profileDir, "sources", "local-skill"); got != want {
+		t.Fatalf("SourcePath = %q, want %q", got, want)
+	}
+	key := plan.Items[0].Key()
+	if key.Agent != profile.AgentCodex || key.Tier != profile.TierUser || key.Name != "local-skill" || key.Source != "local:fixtures//local-skill" || key.TargetPath == "" {
+		t.Fatalf("unexpected placement key: %#v", key)
 	}
 }
 
@@ -79,6 +114,9 @@ func TestBuildRejectsWrongLocalSymlinkTarget(t *testing.T) {
 	}
 	if plan.Summary.WrongTarget != 1 || len(plan.ErrorItems()) != 1 {
 		t.Fatalf("expected wrong target error, got summary=%#v errors=%#v", plan.Summary, plan.ErrorItems())
+	}
+	if len(plan.Creates()) != 0 || plan.Summary.Changes != 0 || plan.Items[0].Action != ActionNone {
+		t.Fatalf("wrong target must not be advertised as a create action, got summary=%#v creates=%#v item=%#v", plan.Summary, plan.Creates(), plan.Items[0])
 	}
 }
 
@@ -130,6 +168,31 @@ func TestBuildRejectsGitHubTargetWithoutMatchingLock(t *testing.T) {
 	}
 	if plan.Summary.WrongKind != 1 || len(plan.ErrorItems()) != 1 {
 		t.Fatalf("expected github lock error, got summary=%#v errors=%#v", plan.Summary, plan.ErrorItems())
+	}
+}
+
+func TestBuildRejectsGitHubSymlinkWithoutCreateAction(t *testing.T) {
+	env := newPlannerEnv(t)
+	target := filepath.Join(env.home, ".agents", "skills", "github-skill")
+	if err := os.Symlink(filepath.Join(env.profileDir, "sources", "local-skill"), target); err != nil {
+		t.Fatalf("write github target symlink: %v", err)
+	}
+	p := profile.Profile{
+		SchemaVersion: profile.CurrentSchemaVersion,
+		Skills: []profile.Skill{{
+			Name:   "github-skill",
+			Tier:   profile.TierUser,
+			Owner:  profile.OwnerUpstream,
+			Source: "github:owner/repo//skills/github-skill",
+			Agents: []profile.Agent{profile.AgentCodex},
+		}},
+	}
+	plan, err := Build(p, Options{ProfilePath: env.profilePath, HomeDir: env.home, RepoDir: env.repo})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if plan.Summary.WrongKind != 1 || len(plan.Creates()) != 0 || plan.Items[0].Action != ActionNone {
+		t.Fatalf("expected github symlink to be an error without create action, got summary=%#v creates=%#v item=%#v", plan.Summary, plan.Creates(), plan.Items[0])
 	}
 }
 

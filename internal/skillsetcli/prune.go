@@ -15,7 +15,7 @@ func (c *PruneCmd) Run(globals *CLI) error {
 	plan, result, _ := globals.buildPlan()
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(globals.profilePath(), result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "prune", globals.profilePath(), result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -29,10 +29,7 @@ func (c *PruneCmd) Run(globals *CLI) error {
 	})
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": "prune", "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "prune", "prune", err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -41,7 +38,12 @@ func (c *PruneCmd) Run(globals *CLI) error {
 	}
 	ok := len(pruned.Failed) == 0
 	if globals.JSON {
-		if err := emitJSON(globals.stdout(), map[string]any{
+		if err := emitCommandJSON(globals.stdout(), "prune", ok, pruned.ProfilePath, pruned.Summary, map[string]any{
+			"planned": pruned.Planned,
+			"deleted": pruned.Deleted,
+			"skipped": pruned.Skipped,
+			"failed":  pruned.Failed,
+		}, nil, pruned.Failed, map[string]any{
 			"ok":           ok,
 			"dry_run":      pruned.DryRun,
 			"profile_path": pruned.ProfilePath,

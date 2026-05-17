@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gh-xj/skillset/internal/planner"
 	"github.com/gh-xj/skillset/internal/profile"
+	"github.com/gh-xj/skillset/internal/skillfs"
 	"github.com/gh-xj/skillset/internal/state"
 )
 
@@ -63,7 +63,11 @@ func Run(plan planner.Plan, opts Options) (Result, error) {
 	}
 	desired := desiredKeys(plan)
 	for _, entry := range store.Managed {
-		if desired[entryKey(entry)] {
+		root, hasRoot := rootForEntry(plan.Roots, entry)
+		if hasRoot {
+			entry = entry.WithResolvedTargetPath(root.Path)
+		}
+		if hasRoot && (desired[entry.KeyForRoot(root.Path)] || semanticallyDesired(plan, entry, root)) {
 			result.Skipped = append(result.Skipped, SkippedEntry{Entry: entry, Reason: "still desired by profile"})
 			continue
 		}
@@ -125,31 +129,115 @@ func Run(plan planner.Plan, opts Options) (Result, error) {
 	return result, nil
 }
 
-func desiredKeys(plan planner.Plan) map[string]bool {
-	out := map[string]bool{}
+func desiredKeys(plan planner.Plan) map[planner.PlacementKey]bool {
+	out := map[planner.PlacementKey]bool{}
 	for _, item := range plan.Items {
 		if item.TargetPath == "" {
 			continue
 		}
-		out[strings.Join([]string{string(item.Agent), string(item.Tier), item.Name, item.Source, item.TargetPath}, "\x00")] = true
+		out[item.Key()] = true
 	}
 	return out
 }
 
-func entryKey(entry state.ManagedEntry) string {
-	return strings.Join([]string{string(entry.Agent), string(entry.Tier), entry.Name, entry.Source, entry.TargetPath}, "\x00")
+func semanticallyDesired(plan planner.Plan, entry state.ManagedEntry, root planner.Root) bool {
+	entry = entry.WithResolvedTargetPath(root.Path)
+	for _, item := range plan.Items {
+		if item.Agent != entry.Agent || item.Tier != entry.Tier || item.Name != entry.Name || item.TargetPath != entry.TargetPath {
+			continue
+		}
+		if item.Source == entry.Source {
+			return true
+		}
+		if localSourcesMatch(plan.ProfileDir, item, entry) {
+			return true
+		}
+		if githubSourcesMatch(item.Source, entry.Source) {
+			return true
+		}
+	}
+	return false
+}
+
+func localSourcesMatch(profileDir string, item planner.Item, entry state.ManagedEntry) bool {
+	desired, err := profile.ParseSource(item.Source)
+	if err != nil || desired.Scheme != profile.SourceLocal || item.SourcePath == "" {
+		return false
+	}
+	recorded, err := profile.ParseSource(entry.Source)
+	if err != nil || recorded.Scheme != profile.SourceLocal {
+		return false
+	}
+	if sameRealPath(item.SourcePath, resolveRecordedLocalSource(profileDir, recorded)) {
+		return true
+	}
+	if entry.TargetPath == "" {
+		return false
+	}
+	targetReal, err := skillfs.RealPath(entry.TargetPath)
+	if err != nil {
+		return false
+	}
+	return sameRealPath(item.SourcePath, targetReal)
+}
+
+func resolveRecordedLocalSource(profileDir string, source profile.Source) string {
+	if source.Local == nil {
+		return ""
+	}
+	root := source.Local.Root
+	if !filepath.IsAbs(root) {
+		root = filepath.Join(profileDir, root)
+	}
+	return filepath.Clean(filepath.Join(root, source.Local.SkillDir))
+}
+
+func sameRealPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aReal, err := skillfs.RealPath(a)
+	if err != nil {
+		return false
+	}
+	bReal, err := skillfs.RealPath(b)
+	if err != nil {
+		return false
+	}
+	return aReal == bReal
+}
+
+func githubSourcesMatch(a, b string) bool {
+	left, err := profile.ParseSource(a)
+	if err != nil || left.GitHub == nil {
+		return false
+	}
+	right, err := profile.ParseSource(b)
+	if err != nil || right.GitHub == nil {
+		return false
+	}
+	return *left.GitHub == *right.GitHub
 }
 
 func removeEntry(entries []state.ManagedEntry, needle state.ManagedEntry) []state.ManagedEntry {
-	key := entryKey(needle)
+	key := needle.Key()
 	out := entries[:0]
 	for _, entry := range entries {
-		if entryKey(entry) == key {
+		if entry.Key() == key || sameManagedEntry(entry, needle) {
 			continue
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+func sameManagedEntry(a, b state.ManagedEntry) bool {
+	return a.Agent == b.Agent &&
+		a.Tier == b.Tier &&
+		a.Name == b.Name &&
+		a.Source == b.Source &&
+		a.TargetRel != "" &&
+		a.TargetRel == b.TargetRel
 }
 
 func rootForEntry(roots []planner.Root, entry state.ManagedEntry) (planner.Root, bool) {
@@ -165,7 +253,7 @@ func deleteManaged(entry state.ManagedEntry, rootPath string) error {
 	if entry.TargetPath == "" || entry.TargetPath == "/" || entry.TargetPath == "." {
 		return fmt.Errorf("refusing unsafe target path %q", entry.TargetPath)
 	}
-	if err := validateTargetUnderRoot(entry.TargetPath, rootPath); err != nil {
+	if err := skillfs.ValidatePathUnderRoot(entry.TargetPath, rootPath); err != nil {
 		return err
 	}
 	info, err := os.Lstat(entry.TargetPath)
@@ -198,28 +286,6 @@ func deleteManaged(entry state.ManagedEntry, rootPath string) error {
 	default:
 		return fmt.Errorf("unsupported managed target kind %q", entry.TargetKind)
 	}
-}
-
-func validateTargetUnderRoot(targetPath, rootPath string) error {
-	if rootPath == "" {
-		return fmt.Errorf("refusing delete without configured root")
-	}
-	rootAbs, err := filepath.Abs(filepath.Clean(rootPath))
-	if err != nil {
-		return fmt.Errorf("resolve root path %s: %w", rootPath, err)
-	}
-	targetAbs, err := filepath.Abs(filepath.Clean(targetPath))
-	if err != nil {
-		return fmt.Errorf("resolve target path %s: %w", targetPath, err)
-	}
-	rel, err := filepath.Rel(rootAbs, targetAbs)
-	if err != nil {
-		return fmt.Errorf("compare target path to root: %w", err)
-	}
-	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
-		return fmt.Errorf("refusing to delete target outside configured root %s: %s", rootAbs, targetAbs)
-	}
-	return nil
 }
 
 func eventID(operation string, entry state.ManagedEntry, ts time.Time) string {

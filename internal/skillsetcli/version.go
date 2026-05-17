@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
-
-	appio "github.com/gh-xj/skillset/internal/io"
 )
 
 type VersionCmd struct{}
@@ -21,7 +19,13 @@ func (c *VersionCmd) Run(globals *CLI) error {
 		Date:          appDate,
 	}
 	if globals.JSON {
-		return appio.WriteJSON(globals.stdout(), data)
+		return emitCommandJSON(globals.stdout(), "version", true, "", nil, data, nil, nil, map[string]any{
+			"name":           data.Name,
+			"version":        data.Version,
+			"version_source": data.VersionSource,
+			"commit":         data.Commit,
+			"date":           data.Date,
+		})
 	}
 	_, err := fmt.Fprintf(globals.stdout(), "%s %s\n", data.Name, data.Version)
 	return err

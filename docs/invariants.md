@@ -20,6 +20,9 @@ profile, but no derived artifact replaces it as the source of intent.
 - `system:<agent>/<skill>`
 
 Adding another source form is a profile schema change.
+`local:<root>//...` may resolve through a profile-local named `roots:` entry
+before falling back to raw path behavior; this does not add a fourth source
+scheme.
 
 ## INV-4 - Read-only commands do not touch live skill roots
 

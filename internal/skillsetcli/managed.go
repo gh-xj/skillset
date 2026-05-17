@@ -14,10 +14,7 @@ func (c *ManagedCmd) Run(globals *CLI) error {
 	store, err := state.Load(statePath)
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": statePath, "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "managed", statePath, err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -25,7 +22,9 @@ func (c *ManagedCmd) Run(globals *CLI) error {
 		return err
 	}
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		return emitCommandJSON(globals.stdout(), "managed", true, globals.profilePath(), map[string]any{"count": len(store.Managed)}, map[string]any{
+			"managed": store.Managed,
+		}, nil, nil, map[string]any{
 			"ok":         true,
 			"state_path": statePath,
 			"count":      len(store.Managed),
@@ -37,7 +36,11 @@ func (c *ManagedCmd) Run(globals *CLI) error {
 		return err
 	}
 	for _, entry := range store.Managed {
-		if _, err := fmt.Fprintf(globals.stdout(), "%s\t%s\t%s\t%s\t%s\n", entry.Agent, entry.Tier, entry.Name, entry.SourceScheme, entry.TargetPath); err != nil {
+		target := entry.TargetPath
+		if target == "" {
+			target = entry.TargetRel
+		}
+		if _, err := fmt.Fprintf(globals.stdout(), "%s\t%s\t%s\t%s\t%s\n", entry.Agent, entry.Tier, entry.Name, entry.SourceScheme, target); err != nil {
 			return err
 		}
 	}

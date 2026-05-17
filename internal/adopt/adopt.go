@@ -8,6 +8,7 @@ import (
 
 	"github.com/gh-xj/skillset/internal/planner"
 	"github.com/gh-xj/skillset/internal/profile"
+	"github.com/gh-xj/skillset/internal/skillfs"
 	"github.com/gh-xj/skillset/internal/state"
 )
 
@@ -106,7 +107,7 @@ func Run(plan planner.Plan, opts Options) (Result, error) {
 }
 
 func adoptable(item planner.Item) bool {
-	return item.Status == planner.StatusPresent && item.Tier == profile.TierUser && item.TargetPath != ""
+	return item.IsAdoptable()
 }
 
 func managedEntry(item planner.Item, toolName string, now time.Time) (state.ManagedEntry, error) {
@@ -124,8 +125,9 @@ func managedEntry(item planner.Item, toolName string, now time.Time) (state.Mana
 		Name:             item.Name,
 		Source:           item.Source,
 		SourceScheme:     item.SourceScheme,
+		TargetRel:        filepath.Base(item.TargetPath),
 		TargetPath:       item.TargetPath,
-		TargetKind:       targetKind(info),
+		TargetKind:       skillfs.TargetKind(info),
 		RecordedBy:       toolName,
 		RecordedAt:       now,
 		LastSeenAt:       now,
@@ -137,8 +139,8 @@ func managedEntry(item planner.Item, toolName string, now time.Time) (state.Mana
 			entry.SymlinkTarget = target
 		}
 	}
-	if source.Scheme == profile.SourceGitHub {
-		entry.InstallCommand = []string{"npx", "skills", "add", source.Owner + "/" + source.Repo, "-g", "-s", item.Name, "-a", string(item.Agent), "-y", "--copy"}
+	if source.GitHub != nil {
+		entry.InstallCommand = []string{"npx", "skills", "add", source.GitHub.Owner + "/" + source.GitHub.Repo, "-g", "-s", item.Name, "-a", string(item.Agent), "-y", "--copy"}
 	}
 	return entry, nil
 }
@@ -163,19 +165,6 @@ func skippedEntry(item planner.Item) SkippedEntry {
 		TargetPath: item.TargetPath,
 		Reason:     reason,
 	}
-}
-
-func targetKind(info os.FileInfo) string {
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "symlink"
-	}
-	if info.IsDir() {
-		return "directory"
-	}
-	if info.Mode().IsRegular() {
-		return "file"
-	}
-	return "other"
 }
 
 func eventID(operation string, entry state.ManagedEntry, ts time.Time) string {

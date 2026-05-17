@@ -10,7 +10,7 @@ func (c *DiffCmd) Run(globals *CLI) error {
 	plan, result, _ := globals.buildPlan()
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(globals.profilePath(), result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "diff", globals.profilePath(), result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -18,14 +18,25 @@ func (c *DiffCmd) Run(globals *CLI) error {
 		}
 		return appctx.NewExitError(appctx.ExitError, "")
 	}
-	changes := plan.Changes()
+	creates := plan.Creates()
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		errors := plan.Errors()
+		ignored := plan.Ignored()
+		ok := len(errors) == 0
+		return emitCommandJSON(globals.stdout(), "diff", ok, plan.ProfilePath, plan.Summary, map[string]any{
+			"creates": creates,
+			"errors":  errors,
+			"ignored": ignored,
+			"items":   plan.Items,
+		}, result.Warnings, errors, map[string]any{
 			"profile_path": plan.ProfilePath,
 			"summary":      plan.Summary,
-			"changes":      changes,
+			"creates":      creates,
+			"errors":       errors,
+			"ignored":      ignored,
+			"changes":      creates,
 			"items":        plan.Items,
 		})
 	}
-	return printPlanItems(globals.stdout(), changes, "no changes")
+	return printPlanItems(globals.stdout(), creates, "no changes")
 }

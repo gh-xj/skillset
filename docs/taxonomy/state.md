@@ -16,7 +16,8 @@ For a profile at `path/to/skills.profile.yaml`:
 
 - `agent`, `tier`, `name`
 - `source`, `source_scheme`
-- `target_path`, `target_kind`
+- `target_rel`, `target_kind`
+- `target_path` for compatibility with older state files
 - `recorded_by`, `recorded_at`, `last_seen_at`
 - `last_operation_id`
 - `skill_folder_hash` for copied `github:` installs when lock metadata exists
@@ -27,3 +28,6 @@ For a profile at `path/to/skills.profile.yaml`:
 
 The state file proves what `skillset` manages. It does not override the
 profile and does not make unknown filesystem entries safe to delete.
+
+New state writes prefer `target_rel`, resolved at runtime under the configured
+agent/tier root. Older `target_path` entries still load for compatibility.

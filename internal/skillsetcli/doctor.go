@@ -22,7 +22,9 @@ type doctorCheck struct {
 func (c *DoctorCmd) Run(globals *CLI) error {
 	checks, ok := globals.doctorChecks()
 	if globals.JSON {
-		if err := emitJSON(globals.stdout(), map[string]any{
+		if err := emitCommandJSON(globals.stdout(), "doctor", ok, globals.profilePath(), map[string]any{"checks": len(checks)}, map[string]any{
+			"checks": checks,
+		}, nil, nil, map[string]any{
 			"ok":     ok,
 			"checks": checks,
 		}); err != nil {

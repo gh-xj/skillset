@@ -12,7 +12,7 @@ func (c *CheckCmd) Run(globals *CLI) error {
 	plan, result, _ := globals.buildPlan()
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(globals.profilePath(), result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "check", globals.profilePath(), result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -22,11 +22,14 @@ func (c *CheckCmd) Run(globals *CLI) error {
 	}
 	ok := plan.Summary.Errors == 0
 	if globals.JSON {
-		if err := emitJSON(globals.stdout(), map[string]any{
+		errors := plan.ErrorItems()
+		if err := emitCommandJSON(globals.stdout(), "check", ok, plan.ProfilePath, plan.Summary, map[string]any{
+			"items": plan.Items,
+		}, result.Warnings, errors, map[string]any{
 			"ok":           ok,
 			"profile_path": plan.ProfilePath,
 			"summary":      plan.Summary,
-			"errors":       plan.ErrorItems(),
+			"errors":       errors,
 			"items":        plan.Items,
 		}); err != nil {
 			return err

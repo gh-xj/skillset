@@ -90,6 +90,8 @@ Contributor guidance remains separate in the repo-local
 
 ```yaml
 schema_version: 1
+roots:
+  local: ./skills
 skills:
   - name: opencli-browser
     tier: user
@@ -97,6 +99,13 @@ skills:
     source: github:jackwener/opencli//skills/opencli-browser
     agents:
       - codex
+  - name: skill-builder
+    tier: user
+    owner: first_party
+    source: local:local//skill-builder
+    agents:
+      - codex
+      - claude-code
 ```
 
 v1 tiers:
@@ -118,6 +127,11 @@ v1 source schemes:
 - `github:<owner>/<repo>//<skill-dir>`
 - `local:<root>//<skill-dir>`
 - `system:<agent>/<skill>`
+
+The optional `roots:` map names reusable local source roots. Root paths resolve
+relative to the profile file. A source like `local:local//skill-builder` uses
+`roots.local` first; if no matching root is declared, `local:<root>//...`
+continues to behave as a raw path for compatibility.
 
 ## Usage
 

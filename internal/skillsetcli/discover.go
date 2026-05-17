@@ -21,10 +21,7 @@ func (c *DiscoverCmd) Run(globals *CLI) error {
 	})
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": "discover", "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "discover", "discover", err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -32,7 +29,10 @@ func (c *DiscoverCmd) Run(globals *CLI) error {
 		return err
 	}
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		return emitCommandJSON(globals.stdout(), "discover", true, result.ProfilePath, result.Summary, map[string]any{
+			"entries":           result.Entries,
+			"suggested_profile": result.SuggestedProfile,
+		}, nil, nil, map[string]any{
 			"ok":                true,
 			"profile_path":      result.ProfilePath,
 			"summary":           result.Summary,

@@ -17,7 +17,7 @@ func (c *ApplyCmd) Run(globals *CLI) error {
 	plan, result, _ := globals.buildPlan()
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(globals.profilePath(), result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "apply", globals.profilePath(), result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -33,10 +33,7 @@ func (c *ApplyCmd) Run(globals *CLI) error {
 	})
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": "apply", "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "apply", "apply", err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -45,7 +42,12 @@ func (c *ApplyCmd) Run(globals *CLI) error {
 	}
 	ok := len(applied.Failed) == 0
 	if globals.JSON {
-		if err := emitJSON(globals.stdout(), map[string]any{
+		if err := emitCommandJSON(globals.stdout(), "apply", ok, applied.ProfilePath, applied.Summary, map[string]any{
+			"planned": applied.Planned,
+			"applied": applied.Applied,
+			"skipped": applied.Skipped,
+			"failed":  applied.Failed,
+		}, nil, applied.Failed, map[string]any{
 			"ok":           ok,
 			"dry_run":      applied.DryRun,
 			"profile_path": applied.ProfilePath,

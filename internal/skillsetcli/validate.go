@@ -17,16 +17,16 @@ func (c *ValidateCmd) Run(globals *CLI) error {
 				Valid:  false,
 				Errors: []profile.Diagnostic{{Path: "profile", Message: err.Error()}},
 			}
-			if writeErr := emitJSON(globals.stdout(), validationPayload(path, result)); writeErr != nil {
+			if writeErr := emitValidationCommandJSON(globals.stdout(), "validate", path, result); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
 		}
 		return err
 	}
-	result := p.Validate()
+	result := p.ValidateForProfile(path)
 	if globals.JSON {
-		if err := emitJSON(globals.stdout(), validationPayload(path, result)); err != nil {
+		if err := emitValidationCommandJSON(globals.stdout(), "validate", path, result); err != nil {
 			return err
 		}
 		if !result.Valid {

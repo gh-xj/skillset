@@ -15,6 +15,47 @@ func emitJSON(w io.Writer, payload map[string]any) error {
 	return appio.WriteJSON(w, payload)
 }
 
+func emitCommandJSON(w io.Writer, command string, ok bool, profilePath string, summary any, result any, warnings any, errors any, legacy map[string]any) error {
+	payload := map[string]any{
+		"ok":       ok,
+		"command":  command,
+		"warnings": emptyIfNil(warnings),
+		"errors":   emptyIfNil(errors),
+	}
+	if profilePath != "" {
+		payload["profile_path"] = profilePath
+	}
+	if summary != nil {
+		payload["summary"] = summary
+	}
+	if result != nil {
+		payload["result"] = result
+	}
+	for key, value := range legacy {
+		payload[key] = value
+	}
+	return emitJSON(w, payload)
+}
+
+func emitCommandErrorJSON(w io.Writer, command, path, message string) error {
+	errors := []profile.Diagnostic{{Path: path, Message: message}}
+	return emitCommandJSON(w, command, false, "", nil, nil, nil, errors, map[string]any{
+		"ok":     false,
+		"errors": errors,
+	})
+}
+
+func emitValidationCommandJSON(w io.Writer, command, path string, result profile.ValidationResult) error {
+	return emitCommandJSON(w, command, result.Valid, path, map[string]any{"valid": result.Valid}, nil, result.Warnings, result.Errors, validationPayload(path, result))
+}
+
+func emptyIfNil(value any) any {
+	if value == nil {
+		return []any{}
+	}
+	return value
+}
+
 func validationPayload(path string, result profile.ValidationResult) map[string]any {
 	if result.Errors == nil {
 		result.Errors = []profile.Diagnostic{}

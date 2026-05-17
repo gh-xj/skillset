@@ -36,9 +36,41 @@ func TestRunClassifiesLockSymlinkAndUnknownEntries(t *testing.T) {
 		t.Fatalf("missing local suggestion in %#v", result.SuggestedProfile.Skills)
 	}
 	local := result.SuggestedProfile.Skills[localIndex]
-	if local.Name != "skill-builder" || len(local.Agents) != 2 || local.Source != "local:.//sources/skill-builder" {
+	if local.Name != "skill-builder" || len(local.Agents) != 2 || local.Source != "local:sources//skill-builder" {
 		t.Fatalf("unexpected local suggestion: %#v", local)
 	}
+	if got := result.SuggestedProfile.Roots["sources"]; got != "sources" {
+		t.Fatalf("expected inferred profile-local root, got %#v", result.SuggestedProfile.Roots)
+	}
+}
+
+func TestRunSuggestedProfileUsesNamedRoots(t *testing.T) {
+	env := newDiscoverEnv(t)
+	if err := os.WriteFile(env.profilePath, []byte(`
+schema_version: 1
+roots:
+  fixtures: ./sources
+skills: []
+`), 0o644); err != nil {
+		t.Fatalf("write profile roots: %v", err)
+	}
+
+	result, err := Run(Options{ProfilePath: env.profilePath, HomeDir: env.home, RepoDir: env.repo})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := result.SuggestedProfile.Roots["fixtures"]; got != "sources" {
+		t.Fatalf("expected suggested profile to carry used named root, got %#v", result.SuggestedProfile.Roots)
+	}
+	for _, skill := range result.SuggestedProfile.Skills {
+		if skill.Name == "skill-builder" {
+			if skill.Source != "local:fixtures//skill-builder" {
+				t.Fatalf("expected named-root source, got %#v", skill)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing local suggestion in %#v", result.SuggestedProfile.Skills)
 }
 
 func TestRunReportsBrokenSymlinkWithoutSuggestion(t *testing.T) {

@@ -19,6 +19,48 @@ func TestValidateSkillDirRequiresNameAndDescription(t *testing.T) {
 	}
 }
 
+func TestInspectSkillDirAndPath(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	writeSkillFile(t, source, "---\nname: example\ndescription: Fixture skill.\n---\n\n# example\n")
+	if observation := InspectSkillDir(source, "example"); !observation.Exists || !observation.Valid {
+		t.Fatalf("expected valid skill dir observation, got %#v", observation)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatalf("symlink target: %v", err)
+	}
+	observation, err := InspectPath(target)
+	if err != nil {
+		t.Fatalf("InspectPath() error = %v", err)
+	}
+	if !observation.Exists || observation.Kind != KindSymlink || observation.SymlinkTarget != source {
+		t.Fatalf("unexpected path observation: %#v", observation)
+	}
+	missing, err := InspectPath(filepath.Join(root, "missing"))
+	if err != nil {
+		t.Fatalf("InspectPath(missing) error = %v", err)
+	}
+	if missing.Exists || missing.Kind != KindMissing {
+		t.Fatalf("unexpected missing observation: %#v", missing)
+	}
+}
+
+func TestValidatePathUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "skills", "example")
+	if err := ValidatePathUnderRoot(inside, root); err != nil {
+		t.Fatalf("expected inside path to validate: %v", err)
+	}
+	outside := filepath.Join(filepath.Dir(root), "outside")
+	if err := ValidatePathUnderRoot(outside, root); err == nil {
+		t.Fatalf("expected outside path to be rejected")
+	}
+}
+
 func TestValidateGitHubInstallRequiresMatchingLock(t *testing.T) {
 	root := t.TempDir()
 	skillRoot := filepath.Join(root, ".agents", "skills")

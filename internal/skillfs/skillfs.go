@@ -26,6 +26,115 @@ type lockSkill struct {
 	SkillPath  string `json:"skillPath"`
 }
 
+const (
+	KindMissing   = "missing"
+	KindSymlink   = "symlink"
+	KindDirectory = "directory"
+	KindFile      = "file"
+	KindOther     = "other"
+)
+
+type SkillDirObservation struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	Valid  bool   `json:"valid"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type PathObservation struct {
+	Path          string `json:"path"`
+	Exists        bool   `json:"exists"`
+	Kind          string `json:"kind"`
+	SymlinkTarget string `json:"symlink_target,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+func InspectSkillDir(path, expectedName string) SkillDirObservation {
+	observation := SkillDirObservation{Path: path}
+	info, err := os.Stat(path)
+	if err != nil {
+		observation.Reason = fmt.Sprintf("read skill directory: %v", err)
+		return observation
+	}
+	observation.Exists = true
+	if !info.IsDir() {
+		observation.Reason = "path is not a directory"
+		return observation
+	}
+	if err := ValidateSkillDir(path, expectedName); err != nil {
+		observation.Reason = err.Error()
+		return observation
+	}
+	observation.Valid = true
+	return observation
+}
+
+func InspectPath(path string) (PathObservation, error) {
+	observation := PathObservation{Path: path}
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			observation.Kind = KindMissing
+			observation.Reason = "path does not exist"
+			return observation, nil
+		}
+		return observation, err
+	}
+	observation.Exists = true
+	observation.Kind = TargetKind(info)
+	if observation.Kind == KindSymlink {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return observation, fmt.Errorf("read symlink target: %w", err)
+		}
+		observation.SymlinkTarget = target
+	}
+	return observation, nil
+}
+
+func TargetKind(info os.FileInfo) string {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return KindSymlink
+	}
+	if info.IsDir() {
+		return KindDirectory
+	}
+	if info.Mode().IsRegular() {
+		return KindFile
+	}
+	return KindOther
+}
+
+func RealPath(path string) (string, error) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(real), nil
+}
+
+func ValidatePathUnderRoot(targetPath, rootPath string) error {
+	if rootPath == "" {
+		return fmt.Errorf("refusing operation without configured root")
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(rootPath))
+	if err != nil {
+		return fmt.Errorf("resolve root path %s: %w", rootPath, err)
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(targetPath))
+	if err != nil {
+		return fmt.Errorf("resolve target path %s: %w", targetPath, err)
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil {
+		return fmt.Errorf("compare target path to root: %w", err)
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return fmt.Errorf("refusing operation outside configured root %s: %s", rootAbs, targetAbs)
+	}
+	return nil
+}
+
 func ValidateSkillDir(path, expectedName string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -55,7 +164,7 @@ func ValidateSkillDir(path, expectedName string) error {
 }
 
 func ValidateGitHubInstall(skillRoot, targetPath, expectedName string, source profile.Source) error {
-	if source.Scheme != profile.SourceGitHub {
+	if source.GitHub == nil {
 		return fmt.Errorf("source is not github")
 	}
 	if err := ValidateSkillDir(targetPath, expectedName); err != nil {
@@ -69,14 +178,14 @@ func ValidateGitHubInstall(skillRoot, targetPath, expectedName string, source pr
 	if !ok {
 		return fmt.Errorf("missing .skill-lock.json entry for %q", expectedName)
 	}
-	expectedSource := source.Owner + "/" + source.Repo
+	expectedSource := source.GitHub.Owner + "/" + source.GitHub.Repo
 	if locked.SourceType != "github" {
 		return fmt.Errorf("lock sourceType is %q, want github", locked.SourceType)
 	}
 	if locked.Source != expectedSource {
 		return fmt.Errorf("lock source is %q, want %q", locked.Source, expectedSource)
 	}
-	expectedPath := filepath.ToSlash(filepath.Join(source.SkillDir, "SKILL.md"))
+	expectedPath := filepath.ToSlash(filepath.Join(source.GitHub.SkillDir, "SKILL.md"))
 	if filepath.ToSlash(locked.SkillPath) != expectedPath {
 		return fmt.Errorf("lock skillPath is %q, want %q", locked.SkillPath, expectedPath)
 	}

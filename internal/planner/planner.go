@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gh-xj/skillset/internal/placement"
 	"github.com/gh-xj/skillset/internal/profile"
 	"github.com/gh-xj/skillset/internal/skillfs"
 )
@@ -53,6 +54,22 @@ type Item struct {
 	Reason       string               `json:"reason,omitempty"`
 }
 
+type DesiredPlacement = Item
+type PlacementDecision = Item
+type PlacementKey = placement.Key
+
+type PlacementObservation struct {
+	Placement DesiredPlacement
+	Source    profile.Source
+
+	Root    Root
+	HasRoot bool
+
+	SourceObservation skillfs.SkillDirObservation
+	TargetObservation skillfs.PathObservation
+	TargetError       error
+}
+
 type Summary struct {
 	Total         int `json:"total"`
 	Present       int `json:"present"`
@@ -64,6 +81,32 @@ type Summary struct {
 	RepoAuditOnly int `json:"repo_audit_only"`
 	Changes       int `json:"changes"`
 	Errors        int `json:"errors"`
+}
+
+func (i Item) Key() PlacementKey {
+	return PlacementKey{
+		Agent:      i.Agent,
+		Tier:       i.Tier,
+		Name:       i.Name,
+		Source:     i.Source,
+		TargetPath: i.TargetPath,
+	}
+}
+
+func (i Item) IsCreateAction() bool {
+	return i.Status == StatusMissingTarget && (i.Action == ActionInstallGitHub || i.Action == ActionLinkLocal)
+}
+
+func (i Item) IsError() bool {
+	return isErrorStatus(i.Status)
+}
+
+func (i Item) IsIgnored() bool {
+	return i.Action == ActionAudit || i.Action == ActionIgnore
+}
+
+func (i Item) IsAdoptable() bool {
+	return i.Status == StatusPresent && i.Tier == profile.TierUser && i.TargetPath != ""
 }
 
 type Plan struct {
@@ -121,7 +164,7 @@ func Build(p profile.Profile, opts Options) (Plan, error) {
 				Source:       skill.Source,
 				SourceScheme: source.Scheme,
 			}
-			completeItem(&item, source, profileDir, roots)
+			completeItem(&item, source, profileDir, p.Roots, roots)
 			plan.Items = append(plan.Items, item)
 		}
 	}
@@ -130,9 +173,13 @@ func Build(p profile.Profile, opts Options) (Plan, error) {
 }
 
 func (p Plan) Changes() []Item {
+	return p.Creates()
+}
+
+func (p Plan) Creates() []Item {
 	out := make([]Item, 0, len(p.Items))
 	for _, item := range p.Items {
-		if item.Action == ActionInstallGitHub || item.Action == ActionLinkLocal {
+		if item.IsCreateAction() {
 			out = append(out, item)
 		}
 	}
@@ -140,127 +187,179 @@ func (p Plan) Changes() []Item {
 }
 
 func (p Plan) ErrorItems() []Item {
+	return p.Errors()
+}
+
+func (p Plan) Errors() []Item {
 	out := make([]Item, 0, len(p.Items))
 	for _, item := range p.Items {
-		if isErrorStatus(item.Status) {
+		if item.IsError() {
 			out = append(out, item)
 		}
 	}
 	return out
 }
 
-func completeItem(item *Item, source profile.Source, profileDir string, roots []Root) {
-	if source.Scheme == profile.SourceLocal {
-		item.SourcePath = resolveSourcePath(profileDir, source)
+func (p Plan) Ignored() []Item {
+	out := make([]Item, 0, len(p.Items))
+	for _, item := range p.Items {
+		if item.IsIgnored() {
+			out = append(out, item)
+		}
 	}
+	return out
+}
+
+func completeItem(item *Item, source profile.Source, profileDir string, namedRoots map[string]string, roots []Root) {
+	observation := observePlacement(*item, source, profileDir, namedRoots, roots)
+	*item = decidePlacement(observation)
+}
+
+func observePlacement(item DesiredPlacement, source profile.Source, profileDir string, namedRoots map[string]string, roots []Root) PlacementObservation {
+	observation := PlacementObservation{
+		Placement: item,
+		Source:    source,
+	}
+	if source.Scheme == profile.SourceLocal {
+		observation.Placement.SourcePath = resolveSourcePath(profileDir, namedRoots, source)
+	}
+	if observation.Placement.Tier == profile.TierSystem {
+		return observation
+	}
+	root, ok := findRoot(roots, observation.Placement.Agent, observation.Placement.Tier)
+	if !ok || root.Path == "" {
+		return observation
+	}
+	observation.Root = root
+	observation.HasRoot = true
+	observation.Placement.TargetPath = filepath.Join(root.Path, observation.Placement.Name)
+	if source.Scheme == profile.SourceLocal {
+		observation.SourceObservation = skillfs.InspectSkillDir(observation.Placement.SourcePath, observation.Placement.Name)
+	}
+	target, err := skillfs.InspectPath(observation.Placement.TargetPath)
+	if err != nil {
+		observation.TargetError = err
+	} else {
+		observation.TargetObservation = target
+	}
+	return observation
+}
+
+func decidePlacement(observation PlacementObservation) PlacementDecision {
+	item := observation.Placement
+	source := observation.Source
 	if item.Tier == profile.TierSystem {
 		item.Status = StatusSystemIgnored
 		item.Action = ActionIgnore
 		item.Reason = "system tier is check/ignore-only"
-		return
+		return item
 	}
 
-	root, ok := findRoot(roots, item.Agent, item.Tier)
-	if !ok || root.Path == "" {
+	if !observation.HasRoot {
 		item.Status = StatusWrongKind
 		item.Action = ActionNone
 		item.Reason = fmt.Sprintf("no root configured for %s/%s", item.Agent, item.Tier)
-		return
+		return item
 	}
-	item.TargetPath = filepath.Join(root.Path, item.Name)
 
-	if source.Scheme == profile.SourceLocal && !pathExists(item.SourcePath) {
-		item.Status = StatusMissingSource
-		item.Action = ActionNone
-		item.Reason = "local source path does not exist"
-		return
-	}
 	if source.Scheme == profile.SourceLocal {
-		if err := skillfs.ValidateSkillDir(item.SourcePath, item.Name); err != nil {
+		if !observation.SourceObservation.Exists {
 			item.Status = StatusMissingSource
 			item.Action = ActionNone
-			item.Reason = fmt.Sprintf("local source is not a valid skill: %v", err)
-			return
+			item.Reason = "local source path does not exist"
+			return item
+		}
+		if !observation.SourceObservation.Valid {
+			item.Status = StatusMissingSource
+			item.Action = ActionNone
+			item.Reason = "local source is not a valid skill: " + observation.SourceObservation.Reason
+			return item
 		}
 	}
 	if item.Tier == profile.TierRepo {
-		if !pathExists(item.TargetPath) {
+		if observation.TargetError != nil {
+			item.Status = StatusWrongKind
+			item.Action = ActionAudit
+			item.Reason = observation.TargetError.Error()
+			return item
+		}
+		if !observation.TargetObservation.Exists {
 			item.Status = StatusMissingTarget
 			item.Action = ActionAudit
 			item.Reason = "repo tier is audit/check-only in v1"
-			return
+			return item
 		}
-		if err := validateInstalledTarget(*item, source, root); err != nil {
+		if err := validateInstalledTarget(item, source, observation.Root); err != nil {
 			item.Status = StatusWrongKind
 			item.Action = ActionAudit
 			item.Reason = err.Error()
-			return
+			return item
 		}
 		item.Status = StatusRepoAuditOnly
 		item.Action = ActionAudit
 		item.Reason = "repo tier is audit/check-only in v1"
-		return
+		return item
 	}
 
-	targetInfo, err := os.Lstat(item.TargetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			item.Status = StatusMissingTarget
-			item.Action = actionForSource(source.Scheme)
-			item.Reason = "target skill is missing"
-			return
-		}
+	if observation.TargetError != nil {
 		item.Status = StatusWrongKind
 		item.Action = ActionNone
-		item.Reason = err.Error()
-		return
+		item.Reason = observation.TargetError.Error()
+		return item
+	}
+	if !observation.TargetObservation.Exists {
+		item.Status = StatusMissingTarget
+		item.Action = actionForSource(source.Scheme)
+		item.Reason = "target skill is missing"
+		return item
 	}
 	if source.Scheme == profile.SourceLocal {
-		validateLocalTarget(item, targetInfo)
-		return
+		validateLocalTarget(&item, observation.TargetObservation)
+		return item
 	}
-	if source.Scheme == profile.SourceGitHub && targetInfo.Mode()&os.ModeSymlink != 0 {
+	if source.Scheme == profile.SourceGitHub && observation.TargetObservation.Kind == skillfs.KindSymlink {
 		item.Status = StatusWrongKind
-		item.Action = ActionInstallGitHub
+		item.Action = ActionNone
 		item.Reason = "github sources use copy mode in v1; target is a symlink"
-		return
+		return item
 	}
 	if source.Scheme == profile.SourceGitHub {
-		if err := validateInstalledTarget(*item, source, root); err != nil {
+		if err := validateInstalledTarget(item, source, observation.Root); err != nil {
 			item.Status = StatusWrongKind
 			item.Action = ActionNone
 			item.Reason = err.Error()
-			return
+			return item
 		}
 	}
 	item.Status = StatusPresent
 	item.Action = ActionNone
+	return item
 }
 
-func validateLocalTarget(item *Item, targetInfo os.FileInfo) {
-	if targetInfo.Mode()&os.ModeSymlink == 0 {
+func validateLocalTarget(item *Item, target skillfs.PathObservation) {
+	if target.Kind != skillfs.KindSymlink {
 		item.Status = StatusWrongKind
-		item.Action = ActionLinkLocal
+		item.Action = ActionNone
 		item.Reason = "local sources use symlink installs in v1"
 		return
 	}
-	target, err := filepath.EvalSymlinks(item.TargetPath)
+	targetReal, err := skillfs.RealPath(item.TargetPath)
 	if err != nil {
 		item.Status = StatusWrongTarget
 		item.Action = ActionLinkLocal
 		item.Reason = fmt.Sprintf("target symlink cannot be resolved: %v", err)
 		return
 	}
-	source, err := filepath.EvalSymlinks(item.SourcePath)
+	sourceReal, err := skillfs.RealPath(item.SourcePath)
 	if err != nil {
 		item.Status = StatusMissingSource
 		item.Action = ActionNone
 		item.Reason = fmt.Sprintf("source cannot be resolved: %v", err)
 		return
 	}
-	if target != source {
+	if targetReal != sourceReal {
 		item.Status = StatusWrongTarget
-		item.Action = ActionLinkLocal
+		item.Action = ActionNone
 		item.Reason = "target symlink points at a different source"
 		return
 	}
@@ -302,10 +401,10 @@ func summarize(items []Item) Summary {
 		case StatusRepoAuditOnly:
 			summary.RepoAuditOnly++
 		}
-		if item.Action == ActionInstallGitHub || item.Action == ActionLinkLocal {
+		if item.IsCreateAction() {
 			summary.Changes++
 		}
-		if isErrorStatus(item.Status) {
+		if item.IsError() {
 			summary.Errors++
 		}
 	}
@@ -341,12 +440,18 @@ func findRoot(roots []Root, agent profile.Agent, tier profile.Tier) (Root, bool)
 	return Root{}, false
 }
 
-func resolveSourcePath(profileDir string, source profile.Source) string {
-	root := source.Root
+func resolveSourcePath(profileDir string, namedRoots map[string]string, source profile.Source) string {
+	if source.Local == nil {
+		return ""
+	}
+	root := source.Local.Root
+	if namedRoot, ok := namedRoots[root]; ok {
+		root = namedRoot
+	}
 	if !filepath.IsAbs(root) {
 		root = filepath.Join(profileDir, root)
 	}
-	return filepath.Clean(filepath.Join(root, source.SkillDir))
+	return filepath.Clean(filepath.Join(root, source.Local.SkillDir))
 }
 
 func resolveHome(home string) (string, error) {

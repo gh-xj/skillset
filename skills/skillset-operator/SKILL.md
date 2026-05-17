@@ -169,11 +169,14 @@ Upstream copied skill:
 First-party local symlink:
 
 ```yaml
-- name: work-cli
-  tier: user
-  owner: first_party
-  source: local:../agent-repo-kit/skills//work-cli
-  agents: [codex]
+roots:
+  ark: ../agent-repo-kit/skills
+skills:
+  - name: work-cli
+    tier: user
+    owner: first_party
+    source: local:ark//work-cli
+    agents: [codex]
 ```
 
 Runtime-provided system skill:

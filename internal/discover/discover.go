@@ -98,23 +98,24 @@ func Run(opts Options) (Result, error) {
 		Roots:       roots,
 	}
 	profileDir := filepath.Dir(result.ProfilePath)
+	namedRoots := loadProfileRoots(result.ProfilePath)
 	for _, root := range roots {
 		if root.Path == "" || root.Tier == profile.TierSystem {
 			continue
 		}
-		entries, err := scanRoot(root, profileDir)
+		entries, err := scanRoot(root, profileDir, namedRoots)
 		if err != nil {
 			return Result{}, err
 		}
 		result.Entries = append(result.Entries, entries...)
 	}
 	sortEntries(result.Entries)
-	result.SuggestedProfile = suggestedProfile(result.Entries)
+	result.SuggestedProfile = suggestedProfile(result.Entries, namedRoots)
 	result.Summary = summarize(result.Entries)
 	return result, nil
 }
 
-func scanRoot(root planner.Root, profileDir string) ([]Entry, error) {
+func scanRoot(root planner.Root, profileDir string, namedRoots map[string]string) ([]Entry, error) {
 	infos, err := os.ReadDir(root.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -142,7 +143,7 @@ func scanRoot(root planner.Root, profileDir string) ([]Entry, error) {
 			Status: StatusUnknown,
 			Reason: "entry is not a symlink and has no recognized lock metadata",
 		}
-		if classifySymlink(&entry, profileDir) {
+		if classifySymlink(&entry, profileDir, namedRoots) {
 			entries = append(entries, entry)
 			continue
 		}
@@ -155,7 +156,7 @@ func scanRoot(root planner.Root, profileDir string) ([]Entry, error) {
 	return entries, nil
 }
 
-func classifySymlink(entry *Entry, profileDir string) bool {
+func classifySymlink(entry *Entry, profileDir string, namedRoots map[string]string) bool {
 	info, err := os.Lstat(entry.Path)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return false
@@ -185,7 +186,7 @@ func classifySymlink(entry *Entry, profileDir string) bool {
 	entry.Kind = KindLocal
 	entry.Status = StatusSuggested
 	entry.Owner = ownerForTier(entry.Tier)
-	entry.Source = localSourceURI(profileDir, target)
+	entry.Source = localSourceURI(profileDir, target, namedRoots)
 	entry.Reason = ""
 	entry.Suggested = &profile.Skill{
 		Name:   entry.Name,
@@ -240,7 +241,7 @@ func readLock(path string) (map[string]lockSkill, error) {
 	return lock.Skills, nil
 }
 
-func suggestedProfile(entries []Entry) profile.Profile {
+func suggestedProfile(entries []Entry, namedRoots map[string]string) profile.Profile {
 	type key struct {
 		name   string
 		tier   profile.Tier
@@ -272,6 +273,7 @@ func suggestedProfile(entries []Entry) profile.Profile {
 		slices.Sort(skill.Agents)
 		out.Skills = append(out.Skills, *skill)
 	}
+	out.Roots = suggestedRoots(out.Skills, namedRoots)
 	return out.Normalized()
 }
 
@@ -320,11 +322,119 @@ func ownerForTier(tier profile.Tier) profile.Owner {
 	return profile.OwnerPrivate
 }
 
-func localSourceURI(profileDir, target string) string {
+func localSourceURI(profileDir, target string, namedRoots map[string]string) string {
+	if source, ok := namedRootSourceURI(profileDir, target, namedRoots); ok {
+		return source
+	}
+	if source, ok := inferredProfileRootSourceURI(profileDir, target); ok {
+		return source
+	}
 	if rel, err := filepath.Rel(profileDir, target); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
 		return fmt.Sprintf("local:.//%s", filepath.ToSlash(rel))
 	}
 	return fmt.Sprintf("local:%s//%s", filepath.ToSlash(filepath.Dir(target)), filepath.ToSlash(filepath.Base(target)))
+}
+
+func inferredProfileRootSourceURI(profileDir, target string) (string, bool) {
+	parentRel, err := filepath.Rel(profileDir, filepath.Dir(target))
+	if err != nil || parentRel == "." || parentRel == ".." || strings.HasPrefix(parentRel, ".."+string(filepath.Separator)) || filepath.IsAbs(parentRel) {
+		return "", false
+	}
+	parentRel = filepath.Clean(parentRel)
+	if strings.Contains(parentRel, string(filepath.Separator)) || !profile.ValidRootName(parentRel) {
+		return "", false
+	}
+	return fmt.Sprintf("local:%s//%s", parentRel, filepath.ToSlash(filepath.Base(target))), true
+}
+
+func loadProfileRoots(profilePath string) map[string]string {
+	p, err := profile.LoadFile(profilePath)
+	if err != nil {
+		return nil
+	}
+	return p.Normalized().Roots
+}
+
+func suggestedRoots(skills []profile.Skill, namedRoots map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, skill := range skills {
+		source, err := profile.ParseSource(skill.Source)
+		if err != nil || source.Scheme != profile.SourceLocal {
+			continue
+		}
+		if rootPath, ok := namedRoots[source.Root]; ok {
+			out[source.Root] = rootPath
+			continue
+		}
+		if profile.ValidRootName(source.Root) {
+			out[source.Root] = source.Root
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func namedRootSourceURI(profileDir, target string, namedRoots map[string]string) (string, bool) {
+	if len(namedRoots) == 0 {
+		return "", false
+	}
+	targetReal, err := realPath(target)
+	if err != nil {
+		return "", false
+	}
+
+	type candidate struct {
+		name string
+		rel  string
+		root string
+	}
+	var best candidate
+	names := make([]string, 0, len(namedRoots))
+	for name := range namedRoots {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		if !profile.ValidRootName(name) {
+			continue
+		}
+		rootPath := strings.TrimSpace(namedRoots[name])
+		if rootPath == "" {
+			continue
+		}
+		if !filepath.IsAbs(rootPath) {
+			rootPath = filepath.Join(profileDir, rootPath)
+		}
+		rootReal, err := realPath(rootPath)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(rootReal, targetReal)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			continue
+		}
+		if best.name == "" || len(rootReal) > len(best.root) {
+			best = candidate{name: name, rel: filepath.ToSlash(rel), root: rootReal}
+		}
+	}
+	if best.name == "" {
+		return "", false
+	}
+	return fmt.Sprintf("local:%s//%s", best.name, best.rel), true
+}
+
+func realPath(path string) (string, error) {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(real), nil
 }
 
 func cleanOrDefault(path, fallback string) string {

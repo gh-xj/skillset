@@ -58,6 +58,21 @@ git push origin vX.Y.Z
 8. If private-config or another profile tracks `skillset-operator`, run its
    profile check after refreshing the installed skill.
 
+## Draft Notes For Next Release
+
+- `skills.profile.yaml` supports optional named `roots:` for reusable local
+  source roots. `local:<name>//<skill>` resolves through `roots.<name>` before
+  falling back to raw path behavior.
+- `discover --suggested-profile` reuses declared roots and can infer simple
+  profile-local roots such as `sources`.
+- Managed state writes prefer `target_rel` and continue to read older
+  `target_path` entries for compatibility.
+- `diff --json` includes `creates`, `errors`, and `ignored` projections while
+  preserving the legacy `changes` and `items` fields.
+- JSON output now has a common command envelope with `ok`, `command`,
+  `summary`, `result`, `warnings`, and `errors` fields while retaining v1
+  top-level command fields.
+
 ## Artifact Decision
 
 Before adding binary artifacts, create a real packaging path first:

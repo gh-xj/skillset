@@ -47,7 +47,7 @@ func TestRunApplyWritesStateAndEvents(t *testing.T) {
 	if store.Managed[0].TargetKind != "directory" || len(store.Managed[0].InstallCommand) == 0 {
 		t.Fatalf("expected github directory install command, got %#v", store.Managed[0])
 	}
-	if store.Managed[1].TargetKind != "symlink" || store.Managed[1].SymlinkTarget == "" {
+	if store.Managed[1].TargetKind != "symlink" || store.Managed[1].TargetRel != "skill-builder" || store.Managed[1].SymlinkTarget == "" {
 		t.Fatalf("expected local symlink metadata, got %#v", store.Managed[1])
 	}
 	events, err := state.LoadEvents(result.EventsPath)

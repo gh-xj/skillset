@@ -134,7 +134,8 @@ func TestCheckJSONPassesWithInstalledFixture(t *testing.T) {
 		t.Fatalf("expected success, got %d (stderr=%q stdout=%q)", code, stderr, stdout)
 	}
 	var payload struct {
-		OK      bool `json:"ok"`
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
 		Summary struct {
 			Errors int `json:"errors"`
 		} `json:"summary"`
@@ -142,7 +143,7 @@ func TestCheckJSONPassesWithInstalledFixture(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("unmarshal check: %v", err)
 	}
-	if !payload.OK || payload.Summary.Errors != 0 {
+	if !payload.OK || payload.Command != "check" || payload.Summary.Errors != 0 {
 		t.Fatalf("unexpected check payload: %#v", payload)
 	}
 }
@@ -157,16 +158,35 @@ func TestDiffJSONReportsMissingGitHubInstall(t *testing.T) {
 		t.Fatalf("expected success, got %d (stderr=%q)", code, stderr)
 	}
 	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
 		Changes []struct {
 			Name   string `json:"name"`
 			Action string `json:"action"`
 		} `json:"changes"`
+		Creates []struct {
+			Name   string `json:"name"`
+			Action string `json:"action"`
+		} `json:"creates"`
+		Errors  []any `json:"errors"`
+		Ignored []any `json:"ignored"`
+		Result  struct {
+			Creates []struct {
+				Name string `json:"name"`
+			} `json:"creates"`
+		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("unmarshal diff: %v", err)
 	}
 	if len(payload.Changes) != 1 || payload.Changes[0].Name != "opencli-browser" || payload.Changes[0].Action != "install_github" {
 		t.Fatalf("unexpected diff payload: %#v", payload)
+	}
+	if len(payload.Creates) != 1 || payload.Creates[0].Name != payload.Changes[0].Name || len(payload.Errors) != 1 || len(payload.Ignored) == 0 {
+		t.Fatalf("unexpected decision projections in diff payload: %#v", payload)
+	}
+	if payload.OK || payload.Command != "diff" || len(payload.Result.Creates) != 1 {
+		t.Fatalf("unexpected diff envelope: %#v", payload)
 	}
 }
 

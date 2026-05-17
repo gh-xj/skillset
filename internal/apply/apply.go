@@ -171,7 +171,7 @@ func ExecRunner(cmd Command) CommandResult {
 }
 
 func operationForItem(item planner.Item) (Operation, bool) {
-	if item.Status != planner.StatusMissingTarget || item.Tier != profile.TierUser {
+	if !item.IsCreateAction() || item.Status != planner.StatusMissingTarget || item.Tier != profile.TierUser {
 		return Operation{}, false
 	}
 	op := Operation{
@@ -194,7 +194,7 @@ func operationForItem(item planner.Item) (Operation, bool) {
 		}
 		op.Command = githubInstallCommand(item, source)
 	}
-	return op, item.Action == planner.ActionLinkLocal || item.Action == planner.ActionInstallGitHub
+	return op, true
 }
 
 func skippedOperation(item planner.Item) Operation {
@@ -288,8 +288,9 @@ func managedEntry(op Operation, toolName string, now time.Time) (state.ManagedEn
 		Name:             op.Name,
 		Source:           op.Source,
 		SourceScheme:     source.Scheme,
+		TargetRel:        filepath.Base(op.TargetPath),
 		TargetPath:       op.TargetPath,
-		TargetKind:       targetKind(info),
+		TargetKind:       skillfs.TargetKind(info),
 		RecordedBy:       toolName,
 		RecordedAt:       now,
 		LastSeenAt:       now,
@@ -308,20 +309,10 @@ func managedEntry(op Operation, toolName string, now time.Time) (state.ManagedEn
 }
 
 func githubInstallCommand(item planner.Item, source profile.Source) []string {
-	return []string{"npx", "skills", "add", source.Owner + "/" + source.Repo, "-g", "-s", item.Name, "-a", string(item.Agent), "-y", "--copy"}
-}
-
-func targetKind(info os.FileInfo) string {
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "symlink"
+	if source.GitHub == nil {
+		return nil
 	}
-	if info.IsDir() {
-		return "directory"
-	}
-	if info.Mode().IsRegular() {
-		return "file"
-	}
-	return "other"
+	return []string{"npx", "skills", "add", source.GitHub.Owner + "/" + source.GitHub.Repo, "-g", "-s", item.Name, "-a", string(item.Agent), "-y", "--copy"}
 }
 
 func eventID(operation string, entry state.ManagedEntry, ts time.Time) string {

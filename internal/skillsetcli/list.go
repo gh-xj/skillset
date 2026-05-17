@@ -27,17 +27,17 @@ func (c *ListCmd) Run(globals *CLI) error {
 	if err != nil {
 		if globals.JSON {
 			result := profileError(err)
-			if writeErr := emitJSON(globals.stdout(), validationPayload(path, result)); writeErr != nil {
+			if writeErr := emitValidationCommandJSON(globals.stdout(), "list", path, result); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
 		}
 		return err
 	}
-	result := p.Validate()
+	result := p.ValidateForProfile(path)
 	if !result.Valid {
 		if globals.JSON {
-			if err := emitJSON(globals.stdout(), validationPayload(path, result)); err != nil {
+			if err := emitValidationCommandJSON(globals.stdout(), "list", path, result); err != nil {
 				return err
 			}
 		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
@@ -53,7 +53,7 @@ func (c *ListCmd) Run(globals *CLI) error {
 				Valid:  false,
 				Errors: []profile.Diagnostic{{Path: "list", Message: err.Error()}},
 			}
-			if writeErr := emitJSON(globals.stdout(), validationPayload(path, result)); writeErr != nil {
+			if writeErr := emitValidationCommandJSON(globals.stdout(), "list", path, result); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -61,7 +61,9 @@ func (c *ListCmd) Run(globals *CLI) error {
 		return err
 	}
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		return emitCommandJSON(globals.stdout(), "list", true, path, map[string]any{"count": len(skills)}, map[string]any{
+			"skills": skills,
+		}, result.Warnings, result.Errors, map[string]any{
 			"profile_path": path,
 			"count":        len(skills),
 			"skills":       skills,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -46,8 +47,9 @@ const (
 )
 
 type Profile struct {
-	SchemaVersion int     `yaml:"schema_version" json:"schema_version"`
-	Skills        []Skill `yaml:"skills" json:"skills"`
+	SchemaVersion int               `yaml:"schema_version" json:"schema_version"`
+	Roots         map[string]string `yaml:"roots,omitempty" json:"roots,omitempty"`
+	Skills        []Skill           `yaml:"skills" json:"skills"`
 }
 
 type Skill struct {
@@ -59,14 +61,33 @@ type Skill struct {
 }
 
 type Source struct {
-	Scheme   SourceScheme `json:"scheme"`
-	Raw      string       `json:"raw"`
-	Owner    string       `json:"owner,omitempty"`
-	Repo     string       `json:"repo,omitempty"`
-	Root     string       `json:"root,omitempty"`
-	SkillDir string       `json:"skill_dir,omitempty"`
-	Agent    Agent        `json:"agent,omitempty"`
-	Skill    string       `json:"skill,omitempty"`
+	Scheme   SourceScheme  `json:"scheme"`
+	Raw      string        `json:"raw"`
+	Owner    string        `json:"owner,omitempty"`
+	Repo     string        `json:"repo,omitempty"`
+	Root     string        `json:"root,omitempty"`
+	SkillDir string        `json:"skill_dir,omitempty"`
+	Agent    Agent         `json:"agent,omitempty"`
+	Skill    string        `json:"skill,omitempty"`
+	GitHub   *GitHubSource `json:"-"`
+	Local    *LocalSource  `json:"-"`
+	System   *SystemSource `json:"-"`
+}
+
+type GitHubSource struct {
+	Owner    string
+	Repo     string
+	SkillDir string
+}
+
+type LocalSource struct {
+	Root     string
+	SkillDir string
+}
+
+type SystemSource struct {
+	Agent Agent
+	Skill string
 }
 
 type Diagnostic struct {
@@ -97,6 +118,7 @@ func LoadFile(path string) (Profile, error) {
 func (p Profile) Normalized() Profile {
 	out := Profile{
 		SchemaVersion: p.SchemaVersion,
+		Roots:         normalizeRoots(p.Roots),
 		Skills:        make([]Skill, 0, len(p.Skills)),
 	}
 	for _, skill := range p.Skills {
@@ -118,10 +140,15 @@ func (p Profile) Normalized() Profile {
 }
 
 func (p Profile) Validate() ValidationResult {
+	return p.ValidateForProfile("")
+}
+
+func (p Profile) ValidateForProfile(profilePath string) ValidationResult {
 	var result ValidationResult
 	if p.SchemaVersion != CurrentSchemaVersion {
 		result.addError("schema_version", fmt.Sprintf("must be %d", CurrentSchemaVersion))
 	}
+	p.validateRoots(&result, profileDir(profilePath))
 
 	seen := map[string]int{}
 	for i, skill := range p.Skills {
@@ -189,6 +216,7 @@ func ParseSource(raw string) (Source, error) {
 		source.Owner = owner
 		source.Repo = repo
 		source.SkillDir = strings.Trim(skillDir, "/")
+		source.GitHub = &GitHubSource{Owner: source.Owner, Repo: source.Repo, SkillDir: source.SkillDir}
 	case SourceLocal:
 		root, skillDir, ok := strings.Cut(body, "//")
 		if !ok || root == "" || skillDir == "" {
@@ -196,6 +224,7 @@ func ParseSource(raw string) (Source, error) {
 		}
 		source.Root = root
 		source.SkillDir = strings.Trim(skillDir, "/")
+		source.Local = &LocalSource{Root: source.Root, SkillDir: source.SkillDir}
 	case SourceSystem:
 		agent, skill, ok := strings.Cut(body, "/")
 		if !ok || agent == "" || skill == "" {
@@ -203,6 +232,7 @@ func ParseSource(raw string) (Source, error) {
 		}
 		source.Agent = Agent(strings.ToLower(agent))
 		source.Skill = strings.Trim(skill, "/")
+		source.System = &SystemSource{Agent: source.Agent, Skill: source.Skill}
 	default:
 		return Source{}, fmt.Errorf("must use github:, local:, or system: source scheme")
 	}
@@ -213,6 +243,83 @@ func ParseSource(raw string) (Source, error) {
 		return Source{}, fmt.Errorf("system source skill is required")
 	}
 	return source, nil
+}
+
+func (p Profile) validateRoots(result *ValidationResult, profileDir string) {
+	if len(p.Roots) == 0 {
+		return
+	}
+	names := make([]string, 0, len(p.Roots))
+	for name := range p.Roots {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	seenPaths := map[string]string{}
+	for _, name := range names {
+		rootPath := strings.TrimSpace(p.Roots[name])
+		base := "roots." + name
+		if !ValidRootName(name) {
+			result.addError(base, "name must match [a-z][a-z0-9_-]*")
+		}
+		if rootPath == "" {
+			result.addError(base, "path is required")
+			continue
+		}
+		if filepath.IsAbs(rootPath) {
+			result.addWarning(base, "absolute root paths are allowed but reduce profile portability")
+		}
+		keys := rootPathKeys(rootPath, profileDir)
+		duplicate := ""
+		for _, key := range keys {
+			if previous, ok := seenPaths[key]; ok {
+				duplicate = previous
+				break
+			}
+		}
+		if duplicate != "" {
+			result.addWarning(base, fmt.Sprintf("resolves to the same path as roots.%s", duplicate))
+			continue
+		}
+		for _, key := range keys {
+			seenPaths[key] = name
+		}
+	}
+}
+
+func profileDir(profilePath string) string {
+	if strings.TrimSpace(profilePath) == "" {
+		return ""
+	}
+	return filepath.Dir(filepath.Clean(profilePath))
+}
+
+func rootPathKeys(rootPath, profileDir string) []string {
+	var keys []string
+	addKey := func(prefix, path string) {
+		path = filepath.Clean(path)
+		key := prefix + path
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	addKey("lex:", rootPath)
+	if profileDir == "" {
+		return keys
+	}
+	resolved := rootPath
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(profileDir, resolved)
+	}
+	abs, err := filepath.Abs(filepath.Clean(resolved))
+	if err != nil {
+		return keys
+	}
+	addKey("abs:", abs)
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		addKey("real:", real)
+	}
+	return keys
 }
 
 func normalizeAgents(agents []Agent) []Agent {
@@ -231,6 +338,43 @@ func normalizeAgents(agents []Agent) []Agent {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func normalizeRoots(roots map[string]string) map[string]string {
+	if len(roots) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(roots))
+	for name, rootPath := range roots {
+		normalizedName := strings.TrimSpace(name)
+		normalizedPath := strings.TrimSpace(rootPath)
+		if normalizedPath != "" {
+			normalizedPath = filepath.Clean(normalizedPath)
+		}
+		out[normalizedName] = normalizedPath
+	}
+	return out
+}
+
+func ValidRootName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case i == 0 && r >= 'a' && r <= 'z':
+			continue
+		case i > 0 && r >= 'a' && r <= 'z':
+			continue
+		case i > 0 && r >= '0' && r <= '9':
+			continue
+		case i > 0 && (r == '_' || r == '-'):
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func validateSourceCoherence(result *ValidationResult, base string, skill Skill, source Source) {
@@ -252,6 +396,12 @@ func validateSourceCoherence(result *ValidationResult, base string, skill Skill,
 	}
 	if skill.Owner == OwnerSystem && source.Scheme != SourceSystem {
 		result.addError(base+".source", "must use system: when owner is system")
+	}
+	if skill.Owner == OwnerSystem && skill.Tier != TierSystem {
+		result.addError(base+".tier", "must be system when owner is system")
+	}
+	if source.Scheme == SourceGitHub && (skill.Owner == OwnerPrivate || skill.Owner == OwnerRepo) {
+		result.addError(base+".owner", "must not be private or repo when source uses github:")
 	}
 }
 
@@ -284,4 +434,8 @@ func validAgent(agent Agent) bool {
 
 func (r *ValidationResult) addError(path, message string) {
 	r.Errors = append(r.Errors, Diagnostic{Path: path, Message: message})
+}
+
+func (r *ValidationResult) addWarning(path, message string) {
+	r.Warnings = append(r.Warnings, Diagnostic{Path: path, Message: message})
 }

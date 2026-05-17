@@ -44,7 +44,7 @@ func TestRunApplyCreatesLocalSymlinkAndRecordsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() state error = %v", err)
 	}
-	if len(store.Managed) != 1 || store.Managed[0].TargetKind != "symlink" {
+	if len(store.Managed) != 1 || store.Managed[0].TargetKind != "symlink" || store.Managed[0].TargetRel != "skill-builder" {
 		t.Fatalf("unexpected managed state: %#v", store.Managed)
 	}
 }

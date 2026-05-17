@@ -42,7 +42,7 @@ func Load(path string) (Store, error) {
 func Save(path string, store Store) error {
 	store.SchemaVersion = CurrentSchemaVersion
 	sortManaged(store.Managed)
-	data, err := yaml.Marshal(store)
+	data, err := yaml.Marshal(storeForSave(store))
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
 	}
@@ -68,14 +68,27 @@ func Save(path string, store Store) error {
 	return nil
 }
 
+func storeForSave(store Store) Store {
+	out := Store{
+		SchemaVersion: store.SchemaVersion,
+		Managed:       append([]ManagedEntry(nil), store.Managed...),
+	}
+	for i := range out.Managed {
+		if out.Managed[i].TargetRel != "" {
+			out.Managed[i].TargetPath = ""
+		}
+	}
+	return out
+}
+
 func MergeManaged(store Store, entries []ManagedEntry) Store {
 	store.SchemaVersion = CurrentSchemaVersion
-	byKey := map[string]ManagedEntry{}
+	byKey := map[PlacementKey]ManagedEntry{}
 	for _, entry := range store.Managed {
-		byKey[managedKey(entry)] = entry
+		byKey[entry.Key()] = entry
 	}
 	for _, entry := range entries {
-		byKey[managedKey(entry)] = entry
+		byKey[entry.Key()] = entry
 	}
 	store.Managed = store.Managed[:0]
 	for _, entry := range byKey {
@@ -144,10 +157,6 @@ func sortManaged(entries []ManagedEntry) {
 		}
 		return 0
 	})
-}
-
-func managedKey(entry ManagedEntry) string {
-	return strings.Join([]string{string(entry.Agent), string(entry.Tier), entry.Name, entry.TargetPath}, "\x00")
 }
 
 func cmpString(a, b string) int {

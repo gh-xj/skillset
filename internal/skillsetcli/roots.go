@@ -16,10 +16,7 @@ func (c *RootsCmd) Run(globals *CLI) error {
 	roots, err := planner.Roots(globals.plannerOptions())
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": "roots", "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "roots", "roots", err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -29,10 +26,7 @@ func (c *RootsCmd) Run(globals *CLI) error {
 	filtered, err := c.filteredRoots(roots)
 	if err != nil {
 		if globals.JSON {
-			if writeErr := emitJSON(globals.stdout(), map[string]any{
-				"ok":     false,
-				"errors": []map[string]string{{"path": "roots", "message": err.Error()}},
-			}); writeErr != nil {
+			if writeErr := emitCommandErrorJSON(globals.stdout(), "roots", "roots", err.Error()); writeErr != nil {
 				return writeErr
 			}
 			return appctx.NewExitError(appctx.ExitError, "")
@@ -40,7 +34,9 @@ func (c *RootsCmd) Run(globals *CLI) error {
 		return err
 	}
 	if globals.JSON {
-		return emitJSON(globals.stdout(), map[string]any{
+		return emitCommandJSON(globals.stdout(), "roots", true, "", map[string]any{"count": len(filtered)}, map[string]any{
+			"roots": filtered,
+		}, nil, nil, map[string]any{
 			"ok":    true,
 			"count": len(filtered),
 			"roots": filtered,

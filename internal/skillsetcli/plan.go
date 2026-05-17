@@ -18,7 +18,7 @@ func (c *CLI) buildPlan() (planner.Plan, profile.ValidationResult, error) {
 	if err != nil {
 		return planner.Plan{}, profileError(err), err
 	}
-	result := p.Validate()
+	result := p.ValidateForProfile(c.profilePath())
 	if !result.Valid {
 		return planner.Plan{}, result, nil
 	}
