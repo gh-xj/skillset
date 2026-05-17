@@ -1,6 +1,6 @@
 ---
 name: skillset-operator
-description: Use when operating the skillset CLI for agent skill desired-state management: creating or reviewing skills.profile.yaml, discovering installed skills, checking drift, adopting existing installs, applying missing user-tier skills, or pruning skillset-managed entries safely.
+description: "Use when operating the skillset CLI for agent skill desired-state management: creating or reviewing skills.profile.yaml, discovering installed skills, checking drift, adopting existing installs, applying missing user-tier skills, or pruning skillset-managed entries safely."
 ---
 
 # skillset-operator
