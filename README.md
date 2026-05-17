@@ -172,6 +172,8 @@ task verify
 `task verify` is also the GitHub Actions CI gate. The smoke fixture lives at
 `test/fixtures/skills.profile.yaml`.
 
+Release procedure lives in [docs/implementation/release.md](docs/implementation/release.md).
+
 ## License
 
 MIT.
