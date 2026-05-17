@@ -1,0 +1,19 @@
+schema_version: 1
+skills:
+  - name: opencli-browser
+    tier: user
+    owner: upstream
+    source: github:jackwener/opencli//skills/opencli-browser
+    agents:
+      - codex
+  - name: skill-builder
+    tier: user
+    owner: first_party
+    source: local:.//local/skills/skill-builder
+    agents:
+      - codex
+      - claude-code
+  - name: browser-use
+    tier: system
+    owner: system
+    source: system:codex/browser-use

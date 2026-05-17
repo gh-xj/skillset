@@ -1,0 +1,172 @@
+version: "3"
+
+vars:
+  BIN: bin/skillset
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  deps:
+    desc: Sync module dependencies
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format Go files in place
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail when gofmt would change files
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  lint:
+    desc: Run static checks
+    deps: [deps, fmt:check]
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run tests
+    deps: [deps, fmt:check]
+    cmds:
+      - go test ./...
+
+  build:
+    desc: Build the skillset binary
+    deps: [deps, fmt:check]
+    sources: ["**/*.go", "go.mod", "go.sum"]
+    generates: ["{{.BIN}}"]
+    method: checksum
+    cmds:
+      - mkdir -p bin
+      - go build -o {{.BIN}} ./cmd/skillset
+
+  run:
+    desc: Run skillset without building
+    cmds:
+      - go run ./cmd/skillset {{.CLI_ARGS}}
+
+  smoke:
+    desc: Deterministic smoke checks for the skillset CLI
+    deps: [build]
+    cmds:
+      - mkdir -p test/smoke
+      - rm -f test/smoke/*.output.json
+      - ./{{.BIN}} --json version > test/smoke/version.output.json
+      - jq -e '.schema_version == "v1" and .name == "skillset"' test/smoke/version.output.json >/dev/null
+      - ./{{.BIN}} --profile test/fixtures/skills.profile.yaml --json validate > test/smoke/validate.output.json
+      - jq -e '.schema_version == "v1" and .valid == true' test/smoke/validate.output.json >/dev/null
+      - ./{{.BIN}} --profile test/fixtures/skills.profile.yaml --json normalize > test/smoke/normalize.output.json
+      - jq -e '.schema_version == "v1" and .profile.schema_version == 1' test/smoke/normalize.output.json >/dev/null
+      - ./{{.BIN}} --profile test/fixtures/skills.profile.yaml --json list > test/smoke/list.output.json
+      - jq -e '.schema_version == "v1" and (.skills | length) == 3' test/smoke/list.output.json >/dev/null
+      - |
+        SMOKE_ROOT=$(mktemp -d)
+        mkdir -p "$SMOKE_ROOT/profile/sources/skill-builder"
+        mkdir -p "$SMOKE_ROOT/home/.agents/skills/opencli-browser"
+        mkdir -p "$SMOKE_ROOT/home/.agents/skills/unknown-copy"
+        mkdir -p "$SMOKE_ROOT/home/.claude/skills"
+        mkdir -p "$SMOKE_ROOT/repo/.codex/skills"
+        mkdir -p "$SMOKE_ROOT/repo/.claude/skills"
+        ln -s "$SMOKE_ROOT/profile/sources/skill-builder" "$SMOKE_ROOT/home/.agents/skills/skill-builder"
+        ln -s "$SMOKE_ROOT/profile/sources/skill-builder" "$SMOKE_ROOT/home/.claude/skills/skill-builder"
+        cat > "$SMOKE_ROOT/home/.agents/.skill-lock.json" <<'JSON'
+        {
+          "version": 3,
+          "skills": {
+            "opencli-browser": {
+              "source": "jackwener/opencli",
+              "sourceType": "github",
+              "sourceUrl": "https://github.com/jackwener/opencli.git",
+              "skillPath": "skills/opencli-browser/SKILL.md",
+              "skillFolderHash": "hash",
+              "installedAt": "2026-04-24T04:35:02.535Z",
+              "updatedAt": "2026-05-17T01:26:16.214Z"
+            }
+          }
+        }
+        JSON
+        cat > "$SMOKE_ROOT/profile/skills.profile.yaml" <<'YAML'
+        schema_version: 1
+        skills:
+          - name: opencli-browser
+            tier: user
+            owner: upstream
+            source: github:jackwener/opencli//skills/opencli-browser
+            agents:
+              - codex
+          - name: skill-builder
+            tier: user
+            owner: first_party
+            source: local:.//sources/skill-builder
+            agents:
+              - codex
+              - claude-code
+          - name: browser-use
+            tier: system
+            owner: system
+            source: system:codex/browser-use
+        YAML
+        ./{{.BIN}} --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json roots > test/smoke/roots.output.json
+        jq -e '.schema_version == "v1" and (.roots | length) == 6' test/smoke/roots.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json check > test/smoke/check.output.json
+        jq -e '.schema_version == "v1" and .ok == true and .summary.errors == 0' test/smoke/check.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json discover > test/smoke/discover.output.json
+        jq -e '.schema_version == "v1" and .ok == true and .summary.github == 1 and .summary.local == 2 and .summary.unknown == 1 and (.suggested_profile.skills | length) == 2' test/smoke/discover.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" discover --suggested-profile > test/smoke/discover-profile.output.yaml
+        yq -e '.schema_version == 1 and (.skills | length) == 2' test/smoke/discover-profile.output.yaml >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json adopt > test/smoke/adopt-dry-run.output.json
+        jq -e '.schema_version == "v1" and .dry_run == true and .summary.adopted == 3 and .summary.written == 0' test/smoke/adopt-dry-run.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json managed > test/smoke/managed-empty.output.json
+        jq -e '.schema_version == "v1" and .count == 0' test/smoke/managed-empty.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json adopt --apply > test/smoke/adopt-apply.output.json
+        jq -e '.schema_version == "v1" and .dry_run == false and .summary.adopted == 3 and .summary.written == 3' test/smoke/adopt-apply.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --json managed > test/smoke/managed.output.json
+        jq -e '.schema_version == "v1" and .count == 3' test/smoke/managed.output.json >/dev/null
+        rm "$SMOKE_ROOT/home/.claude/skills/skill-builder"
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json apply > test/smoke/apply-dry-run.output.json
+        jq -e '.schema_version == "v1" and .dry_run == true and .summary.planned == 1 and .summary.applied == 0' test/smoke/apply-dry-run.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json apply --apply > test/smoke/apply-apply.output.json
+        jq -e '.schema_version == "v1" and .dry_run == false and .summary.applied == 1 and .summary.written == 1' test/smoke/apply-apply.output.json >/dev/null
+        cat > "$SMOKE_ROOT/profile/skills.profile.yaml" <<'YAML'
+        schema_version: 1
+        skills:
+          - name: opencli-browser
+            tier: user
+            owner: upstream
+            source: github:jackwener/opencli//skills/opencli-browser
+            agents:
+              - codex
+          - name: browser-use
+            tier: system
+            owner: system
+            source: system:codex/browser-use
+        YAML
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json prune > test/smoke/prune-dry-run.output.json
+        jq -e '.schema_version == "v1" and .dry_run == true and .summary.planned == 2 and .summary.deleted == 0' test/smoke/prune-dry-run.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json prune --apply > test/smoke/prune-apply.output.json
+        jq -e '.schema_version == "v1" and .dry_run == false and .summary.deleted == 2 and .summary.written == 2' test/smoke/prune-apply.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --json managed > test/smoke/managed-after-prune.output.json
+        jq -e '.schema_version == "v1" and .count == 1' test/smoke/managed-after-prune.output.json >/dev/null
+        rm -rf "$SMOKE_ROOT/home/.agents/skills/opencli-browser"
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json diff > test/smoke/diff.output.json
+        jq -e '.schema_version == "v1" and (.changes | length) == 1 and .changes[0].action == "install_github"' test/smoke/diff.output.json >/dev/null
+        ./{{.BIN}} --profile "$SMOKE_ROOT/profile/skills.profile.yaml" --home "$SMOKE_ROOT/home" --repo "$SMOKE_ROOT/repo" --json doctor > test/smoke/doctor.output.json && exit 1 || true
+        jq -e '.schema_version == "v1" and .ok == false and any(.checks[]; .name == "skill_state" and .status == "error")' test/smoke/doctor.output.json >/dev/null
+
+  ci:
+    desc: Canonical CI contract command
+    deps: [lint, test, smoke]
+    cmds:
+      - echo "ci checks passed"
+
+  verify:
+    desc: Local verification gate
+    deps: [ci]
+    cmds:
+      - bash scripts/verify.sh

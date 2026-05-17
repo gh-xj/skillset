@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/.work/
+/.task/
+/test/smoke/*.output.json
+/test/smoke/*.output.yaml
+/.skillset/

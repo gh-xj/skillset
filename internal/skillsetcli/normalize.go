@@ -1,0 +1,45 @@
+package skillsetcli
+
+import (
+	"github.com/gh-xj/skillset/internal/appctx"
+	"gopkg.in/yaml.v3"
+)
+
+type NormalizeCmd struct{}
+
+func (c *NormalizeCmd) Run(globals *CLI) error {
+	p, path, err := globals.loadProfile()
+	if err != nil {
+		if globals.JSON {
+			result := profileError(err)
+			if writeErr := emitJSON(globals.stdout(), validationPayload(path, result)); writeErr != nil {
+				return writeErr
+			}
+			return appctx.NewExitError(appctx.ExitError, "")
+		}
+		return err
+	}
+	result := p.Validate()
+	if !result.Valid {
+		if globals.JSON {
+			if err := emitJSON(globals.stdout(), validationPayload(path, result)); err != nil {
+				return err
+			}
+		} else if err := printValidationErrors(globals.stderr(), result); err != nil {
+			return err
+		}
+		return appctx.NewExitError(appctx.ExitError, "")
+	}
+	if globals.JSON {
+		return emitJSON(globals.stdout(), map[string]any{
+			"profile_path": path,
+			"profile":      p,
+		})
+	}
+	data, err := yaml.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = globals.stdout().Write(data)
+	return err
+}

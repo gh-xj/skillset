@@ -1,0 +1,28 @@
+# skillset conventions descriptor.
+# Read by repo agents and checked by scripts/verify.sh.
+
+agent_docs:
+  - AGENTS.md
+
+docs_root: docs
+
+core_beliefs:
+  enabled: true
+  path: docs
+
+taskfile: true
+
+pre_commit: false
+
+skill_roots:
+  - .claude/skills
+  - skills
+
+checks:
+  - "AGENTS.md covers architecture, commands, non-negotiable rules, and verification."
+  - "docs/core-belief.md, docs/invariants.md, and docs/anti-patterns.md are the philosophical contract for schema and workflow changes."
+  - "docs/{requests,planning,plans,implementation,taxonomy} directories exist."
+  - "task verify exits 0 from a clean checkout."
+  - "scripts/verify.sh asserts declared opt-ins only; prose checks remain agent-reviewed."
+  - ".claude/skills/skillset-maintainer/SKILL.md is repo-local and not a global install target."
+  - "skills/skillset-operator/SKILL.md is the public installable operator skill."
