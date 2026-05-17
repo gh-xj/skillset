@@ -89,6 +89,45 @@ func TestRunApplyRefusesUnsafeDirectory(t *testing.T) {
 	}
 }
 
+func TestRunApplyRefusesTargetOutsideConfiguredRoot(t *testing.T) {
+	env := newPruneEnv(t)
+	outside := filepath.Join(env.root, "outside-target")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside target: %v", err)
+	}
+	writePruneSkill(t, outside, "outside-target")
+	store, err := state.Load(state.StatePathForProfile(env.profilePath))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	store = state.MergeManaged(store, []state.ManagedEntry{{
+		Agent:         profile.AgentCodex,
+		Tier:          profile.TierUser,
+		Name:          "outside-target",
+		Source:        "github:owner/repo//skills/outside-target",
+		SourceScheme:  profile.SourceGitHub,
+		TargetPath:    outside,
+		TargetKind:    "directory",
+		RecordedBy:    "skillset",
+		RecordedAt:    fixedNow(),
+		LastSeenAt:    fixedNow(),
+		PruneEligible: true,
+	}})
+	if err := state.Save(state.StatePathForProfile(env.profilePath), store); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	result, err := Run(env.plan(t, nil), Options{Apply: true, ProfilePath: env.profilePath, Now: fixedNow})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Summary.Failed != 1 {
+		t.Fatalf("expected outside-root prune failure, got %#v", result)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside target should remain: %v", err)
+	}
+}
+
 func TestRunApplyRefusesChangedSymlinkTarget(t *testing.T) {
 	env := newPruneEnv(t)
 	changedSource := filepath.Join(env.profileDir, "sources", "changed")
@@ -143,6 +182,7 @@ func newPruneEnv(t *testing.T) pruneEnv {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
+	writePruneSkill(t, source, "keep")
 	if err := os.Symlink(source, env.desiredTarget); err != nil {
 		t.Fatalf("symlink desired: %v", err)
 	}
@@ -191,6 +231,14 @@ func newPruneEnv(t *testing.T) pruneEnv {
 
 func (e pruneEnv) desiredSkill() profile.Skill {
 	return profile.Skill{Name: "keep", Tier: profile.TierUser, Owner: profile.OwnerPrivate, Source: "local:.//sources/keep", Agents: []profile.Agent{profile.AgentCodex}}
+}
+
+func writePruneSkill(t *testing.T, dir, name string) {
+	t.Helper()
+	body := "---\nname: " + name + "\ndescription: Fixture skill.\n---\n\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SKILL.md for %s: %v", name, err)
+	}
 }
 
 func (e pruneEnv) plan(t *testing.T, skills []profile.Skill) planner.Plan {

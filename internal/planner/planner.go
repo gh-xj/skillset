@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/gh-xj/skillset/internal/profile"
+	"github.com/gh-xj/skillset/internal/skillfs"
 )
 
 const (
@@ -125,19 +125,6 @@ func Build(p profile.Profile, opts Options) (Plan, error) {
 			plan.Items = append(plan.Items, item)
 		}
 	}
-	slices.SortFunc(plan.Items, func(a, b Item) int {
-		for _, cmp := range []int{
-			cmpString(string(a.Agent), string(b.Agent)),
-			cmpString(string(a.Tier), string(b.Tier)),
-			cmpString(a.Name, b.Name),
-			cmpString(a.Source, b.Source),
-		} {
-			if cmp != 0 {
-				return cmp
-			}
-		}
-		return 0
-	})
 	plan.Summary = summarize(plan.Items)
 	return plan, nil
 }
@@ -188,11 +175,25 @@ func completeItem(item *Item, source profile.Source, profileDir string, roots []
 		item.Reason = "local source path does not exist"
 		return
 	}
+	if source.Scheme == profile.SourceLocal {
+		if err := skillfs.ValidateSkillDir(item.SourcePath, item.Name); err != nil {
+			item.Status = StatusMissingSource
+			item.Action = ActionNone
+			item.Reason = fmt.Sprintf("local source is not a valid skill: %v", err)
+			return
+		}
+	}
 	if item.Tier == profile.TierRepo {
 		if !pathExists(item.TargetPath) {
 			item.Status = StatusMissingTarget
 			item.Action = ActionAudit
 			item.Reason = "repo tier is audit/check-only in v1"
+			return
+		}
+		if err := validateInstalledTarget(*item, source, root); err != nil {
+			item.Status = StatusWrongKind
+			item.Action = ActionAudit
+			item.Reason = err.Error()
 			return
 		}
 		item.Status = StatusRepoAuditOnly
@@ -223,6 +224,14 @@ func completeItem(item *Item, source profile.Source, profileDir string, roots []
 		item.Action = ActionInstallGitHub
 		item.Reason = "github sources use copy mode in v1; target is a symlink"
 		return
+	}
+	if source.Scheme == profile.SourceGitHub {
+		if err := validateInstalledTarget(*item, source, root); err != nil {
+			item.Status = StatusWrongKind
+			item.Action = ActionNone
+			item.Reason = err.Error()
+			return
+		}
 	}
 	item.Status = StatusPresent
 	item.Action = ActionNone
@@ -257,6 +266,20 @@ func validateLocalTarget(item *Item, targetInfo os.FileInfo) {
 	}
 	item.Status = StatusPresent
 	item.Action = ActionNone
+}
+
+func validateInstalledTarget(item Item, source profile.Source, root Root) error {
+	switch source.Scheme {
+	case profile.SourceLocal:
+		return skillfs.ValidateSkillDir(item.TargetPath, item.Name)
+	case profile.SourceGitHub:
+		if err := skillfs.ValidateGitHubInstall(root.Path, item.TargetPath, item.Name, source); err != nil {
+			return fmt.Errorf("github target is not a valid npx skills install: %w", err)
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 func summarize(items []Item) Summary {
@@ -350,14 +373,4 @@ func pathExists(path string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func cmpString(a, b string) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
 }

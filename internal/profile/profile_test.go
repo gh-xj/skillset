@@ -29,16 +29,16 @@ skills:
 		t.Fatalf("LoadFile() error = %v", err)
 	}
 	normalized := p.Normalized()
-	if got := normalized.Skills[0].Name; got != "browser-use" {
-		t.Fatalf("expected skills sorted by name, got %q", got)
+	if got := normalized.Skills[0].Name; got != "skill-builder" {
+		t.Fatalf("expected profile order to be preserved, got first skill %q", got)
 	}
-	if got := normalized.Skills[1].Tier; got != TierUser {
+	if got := normalized.Skills[0].Tier; got != TierUser {
 		t.Fatalf("expected normalized tier user, got %q", got)
 	}
-	if len(normalized.Skills[1].Agents) != 2 {
-		t.Fatalf("expected duplicate agents removed, got %#v", normalized.Skills[1].Agents)
+	if len(normalized.Skills[0].Agents) != 2 {
+		t.Fatalf("expected duplicate agents removed, got %#v", normalized.Skills[0].Agents)
 	}
-	if got := normalized.Skills[0].Agents; len(got) != 1 || got[0] != AgentCodex {
+	if got := normalized.Skills[1].Agents; len(got) != 1 || got[0] != AgentCodex {
 		t.Fatalf("expected system source agent inferred, got %#v", got)
 	}
 	if result := normalized.Validate(); !result.Valid {

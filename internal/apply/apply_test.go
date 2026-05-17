@@ -63,7 +63,12 @@ func TestRunApplyDelegatesGitHubAndRequiresTarget(t *testing.T) {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return CommandResult{ExitCode: 1, Err: err.Error()}
 			}
-			if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("# opencli-browser\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("---\nname: opencli-browser\ndescription: Fixture skill.\n---\n\n# opencli-browser\n"), 0o644); err != nil {
+				return CommandResult{ExitCode: 1, Err: err.Error()}
+			}
+			lockPath := filepath.Join(env.home, ".agents", ".skill-lock.json")
+			lock := `{"skills":{"opencli-browser":{"source":"jackwener/opencli","sourceType":"github","skillPath":"skills/opencli-browser/SKILL.md"}}}`
+			if err := os.WriteFile(lockPath, []byte(lock), 0o644); err != nil {
 				return CommandResult{ExitCode: 1, Err: err.Error()}
 			}
 			return CommandResult{}
@@ -132,10 +137,19 @@ func newApplyEnv(t *testing.T) applyEnv {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
+	writeApplySkill(t, filepath.Join(env.profileDir, "sources", "skill-builder"), "skill-builder")
 	if err := os.WriteFile(env.profilePath, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
 		t.Fatalf("write profile placeholder: %v", err)
 	}
 	return env
+}
+
+func writeApplySkill(t *testing.T, dir, name string) {
+	t.Helper()
+	body := "---\nname: " + name + "\ndescription: Fixture skill.\n---\n\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SKILL.md for %s: %v", name, err)
+	}
 }
 
 func (e applyEnv) plan(t *testing.T) planner.Plan {

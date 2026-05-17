@@ -82,6 +82,57 @@ func TestBuildRejectsWrongLocalSymlinkTarget(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsLocalSourceWithoutSkillFile(t *testing.T) {
+	env := newPlannerEnv(t)
+	badSource := filepath.Join(env.profileDir, "sources", "bad-source")
+	if err := os.MkdirAll(badSource, 0o755); err != nil {
+		t.Fatalf("mkdir bad source: %v", err)
+	}
+	p := profile.Profile{
+		SchemaVersion: profile.CurrentSchemaVersion,
+		Skills: []profile.Skill{{
+			Name:   "bad-source",
+			Tier:   profile.TierUser,
+			Owner:  profile.OwnerPrivate,
+			Source: "local:.//sources/bad-source",
+			Agents: []profile.Agent{profile.AgentCodex},
+		}},
+	}
+	plan, err := Build(p, Options{ProfilePath: env.profilePath, HomeDir: env.home, RepoDir: env.repo})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if plan.Summary.MissingSource != 1 || len(plan.ErrorItems()) != 1 {
+		t.Fatalf("expected invalid local source error, got summary=%#v errors=%#v", plan.Summary, plan.ErrorItems())
+	}
+}
+
+func TestBuildRejectsGitHubTargetWithoutMatchingLock(t *testing.T) {
+	env := newPlannerEnv(t)
+	target := filepath.Join(env.home, ".agents", "skills", "github-skill")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir github target: %v", err)
+	}
+	writeSkill(t, target, "github-skill")
+	p := profile.Profile{
+		SchemaVersion: profile.CurrentSchemaVersion,
+		Skills: []profile.Skill{{
+			Name:   "github-skill",
+			Tier:   profile.TierUser,
+			Owner:  profile.OwnerUpstream,
+			Source: "github:owner/repo//skills/github-skill",
+			Agents: []profile.Agent{profile.AgentCodex},
+		}},
+	}
+	plan, err := Build(p, Options{ProfilePath: env.profilePath, HomeDir: env.home, RepoDir: env.repo})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if plan.Summary.WrongKind != 1 || len(plan.ErrorItems()) != 1 {
+		t.Fatalf("expected github lock error, got summary=%#v errors=%#v", plan.Summary, plan.ErrorItems())
+	}
+}
+
 type plannerEnv struct {
 	root        string
 	home        string
@@ -104,6 +155,7 @@ func newPlannerEnv(t *testing.T) plannerEnv {
 	if err := os.MkdirAll(localSource, 0o755); err != nil {
 		t.Fatalf("mkdir local source: %v", err)
 	}
+	writeSkill(t, localSource, "local-skill")
 	userRoot := filepath.Join(env.home, ".agents", "skills")
 	if err := os.MkdirAll(userRoot, 0o755); err != nil {
 		t.Fatalf("mkdir user root: %v", err)
@@ -118,4 +170,12 @@ func newPlannerEnv(t *testing.T) plannerEnv {
 		t.Fatalf("write local skill symlink: %v", err)
 	}
 	return env
+}
+
+func writeSkill(t *testing.T, dir, name string) {
+	t.Helper()
+	body := "---\nname: " + name + "\ndescription: Fixture skill.\n---\n\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SKILL.md for %s: %v", name, err)
+	}
 }

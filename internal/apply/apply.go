@@ -10,6 +10,7 @@ import (
 
 	"github.com/gh-xj/skillset/internal/planner"
 	"github.com/gh-xj/skillset/internal/profile"
+	"github.com/gh-xj/skillset/internal/skillfs"
 	"github.com/gh-xj/skillset/internal/state"
 )
 
@@ -229,8 +230,8 @@ func applyLocal(op Operation, opts Options, now time.Time) (Operation, state.Man
 	if op.SourcePath == "" {
 		return op, state.ManagedEntry{}, fmt.Errorf("local source path is empty")
 	}
-	if _, err := os.Stat(op.SourcePath); err != nil {
-		return op, state.ManagedEntry{}, fmt.Errorf("local source path is not readable: %w", err)
+	if err := skillfs.ValidateSkillDir(op.SourcePath, op.Name); err != nil {
+		return op, state.ManagedEntry{}, fmt.Errorf("local source path is not a valid skill: %w", err)
 	}
 	if _, err := os.Lstat(op.TargetPath); err == nil {
 		return op, state.ManagedEntry{}, fmt.Errorf("target already exists: %s", op.TargetPath)
@@ -260,6 +261,13 @@ func applyGitHub(op Operation, opts Options, now time.Time) (Operation, state.Ma
 	}
 	if _, err := os.Lstat(op.TargetPath); err != nil {
 		return op, state.ManagedEntry{}, fmt.Errorf("github install did not create target %s: %w", op.TargetPath, err)
+	}
+	source, err := profile.ParseSource(op.Source)
+	if err != nil {
+		return op, state.ManagedEntry{}, err
+	}
+	if err := skillfs.ValidateGitHubInstall(filepath.Dir(op.TargetPath), op.TargetPath, op.Name, source); err != nil {
+		return op, state.ManagedEntry{}, fmt.Errorf("github install did not create a valid npx skills target: %w", err)
 	}
 	entry, err := managedEntry(op, opts.ToolName, now)
 	return op, entry, err

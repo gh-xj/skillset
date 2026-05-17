@@ -84,7 +84,12 @@ func Run(plan planner.Plan, opts Options) (Result, error) {
 	}
 	remaining := append([]state.ManagedEntry(nil), store.Managed...)
 	for _, entry := range result.Planned {
-		if err := deleteManaged(entry); err != nil {
+		root, ok := rootForEntry(plan.Roots, entry)
+		if !ok {
+			result.Failed = append(result.Failed, SkippedEntry{Entry: entry, Reason: "no configured root for managed entry"})
+			continue
+		}
+		if err := deleteManaged(entry, root.Path); err != nil {
 			result.Failed = append(result.Failed, SkippedEntry{Entry: entry, Reason: err.Error()})
 			continue
 		}
@@ -147,9 +152,21 @@ func removeEntry(entries []state.ManagedEntry, needle state.ManagedEntry) []stat
 	return out
 }
 
-func deleteManaged(entry state.ManagedEntry) error {
+func rootForEntry(roots []planner.Root, entry state.ManagedEntry) (planner.Root, bool) {
+	for _, root := range roots {
+		if root.Agent == entry.Agent && root.Tier == entry.Tier {
+			return root, true
+		}
+	}
+	return planner.Root{}, false
+}
+
+func deleteManaged(entry state.ManagedEntry, rootPath string) error {
 	if entry.TargetPath == "" || entry.TargetPath == "/" || entry.TargetPath == "." {
 		return fmt.Errorf("refusing unsafe target path %q", entry.TargetPath)
+	}
+	if err := validateTargetUnderRoot(entry.TargetPath, rootPath); err != nil {
+		return err
 	}
 	info, err := os.Lstat(entry.TargetPath)
 	if err != nil {
@@ -181,6 +198,28 @@ func deleteManaged(entry state.ManagedEntry) error {
 	default:
 		return fmt.Errorf("unsupported managed target kind %q", entry.TargetKind)
 	}
+}
+
+func validateTargetUnderRoot(targetPath, rootPath string) error {
+	if rootPath == "" {
+		return fmt.Errorf("refusing delete without configured root")
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(rootPath))
+	if err != nil {
+		return fmt.Errorf("resolve root path %s: %w", rootPath, err)
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(targetPath))
+	if err != nil {
+		return fmt.Errorf("resolve target path %s: %w", targetPath, err)
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil {
+		return fmt.Errorf("compare target path to root: %w", err)
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return fmt.Errorf("refusing to delete target outside configured root %s: %s", rootAbs, targetAbs)
+	}
+	return nil
 }
 
 func eventID(operation string, entry state.ManagedEntry, ts time.Time) string {

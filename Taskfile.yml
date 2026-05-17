@@ -73,6 +73,22 @@ tasks:
         mkdir -p "$SMOKE_ROOT/home/.claude/skills"
         mkdir -p "$SMOKE_ROOT/repo/.codex/skills"
         mkdir -p "$SMOKE_ROOT/repo/.claude/skills"
+        cat > "$SMOKE_ROOT/profile/sources/skill-builder/SKILL.md" <<'MD'
+        ---
+        name: skill-builder
+        description: Fixture skill.
+        ---
+
+        # skill-builder
+        MD
+        cat > "$SMOKE_ROOT/home/.agents/skills/opencli-browser/SKILL.md" <<'MD'
+        ---
+        name: opencli-browser
+        description: Fixture skill.
+        ---
+
+        # opencli-browser
+        MD
         ln -s "$SMOKE_ROOT/profile/sources/skill-builder" "$SMOKE_ROOT/home/.agents/skills/skill-builder"
         ln -s "$SMOKE_ROOT/profile/sources/skill-builder" "$SMOKE_ROOT/home/.claude/skills/skill-builder"
         cat > "$SMOKE_ROOT/home/.agents/.skill-lock.json" <<'JSON'

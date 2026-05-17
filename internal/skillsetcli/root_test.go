@@ -90,7 +90,7 @@ func TestListJSONIncludesSourceScheme(t *testing.T) {
 	if payload.Count != 2 {
 		t.Fatalf("expected two codex skills, got %#v", payload)
 	}
-	if payload.Skills[0].Name != "browser-use" || payload.Skills[0].SourceScheme != "system" {
+	if payload.Skills[0].Name != "skill-builder" || payload.Skills[0].SourceScheme != "local" {
 		t.Fatalf("unexpected first list item: %#v", payload.Skills[0])
 	}
 }
@@ -445,6 +445,9 @@ func newCLIEnv(t *testing.T, profileBody string) cliEnv {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
+	writeCLISkill(t, filepath.Join(env.home, ".agents", "skills", "opencli-browser"), "opencli-browser")
+	writeCLILock(t, filepath.Join(env.home, ".agents", ".skill-lock.json"))
+	writeCLISkill(t, filepath.Join(env.profileDir, "sources", "skill-builder"), "skill-builder")
 	if err := os.WriteFile(env.profilePath, []byte(profileBody), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -480,10 +483,27 @@ func newMissingLocalCLIEnv(t *testing.T) cliEnv {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
+	writeCLISkill(t, filepath.Join(env.profileDir, "sources", "skill-builder"), "skill-builder")
 	if err := os.WriteFile(env.profilePath, []byte(missingLocalProfile), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
 	return env
+}
+
+func writeCLISkill(t *testing.T, dir, name string) {
+	t.Helper()
+	body := "---\nname: " + name + "\ndescription: Fixture skill.\n---\n\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SKILL.md for %s: %v", name, err)
+	}
+}
+
+func writeCLILock(t *testing.T, path string) {
+	t.Helper()
+	body := `{"skills":{"opencli-browser":{"source":"jackwener/opencli","sourceType":"github","skillPath":"skills/opencli-browser/SKILL.md"}}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
 }
 
 func writeCLIProfile(t *testing.T, body string) string {

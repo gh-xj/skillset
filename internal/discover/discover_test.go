@@ -25,7 +25,17 @@ func TestRunClassifiesLockSymlinkAndUnknownEntries(t *testing.T) {
 			t.Fatalf("suggested entry should not carry a reason: %#v", entry)
 		}
 	}
-	local := result.SuggestedProfile.Skills[1]
+	localIndex := -1
+	for i := range result.SuggestedProfile.Skills {
+		if result.SuggestedProfile.Skills[i].Name == "skill-builder" {
+			localIndex = i
+			break
+		}
+	}
+	if localIndex == -1 {
+		t.Fatalf("missing local suggestion in %#v", result.SuggestedProfile.Skills)
+	}
+	local := result.SuggestedProfile.Skills[localIndex]
 	if local.Name != "skill-builder" || len(local.Agents) != 2 || local.Source != "local:.//sources/skill-builder" {
 		t.Fatalf("unexpected local suggestion: %#v", local)
 	}

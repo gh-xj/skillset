@@ -248,6 +248,7 @@ func suggestedProfile(entries []Entry) profile.Profile {
 		source string
 	}
 	byKey := map[key]*profile.Skill{}
+	var keys []key
 	for _, entry := range entries {
 		if entry.Suggested == nil {
 			continue
@@ -258,6 +259,7 @@ func suggestedProfile(entries []Entry) profile.Profile {
 			copy := *entry.Suggested
 			copy.Agents = append([]profile.Agent(nil), entry.Suggested.Agents...)
 			byKey[k] = &copy
+			keys = append(keys, k)
 			continue
 		}
 		if !slices.Contains(skill.Agents, entry.Agent) {
@@ -265,7 +267,8 @@ func suggestedProfile(entries []Entry) profile.Profile {
 		}
 	}
 	out := profile.Profile{SchemaVersion: profile.CurrentSchemaVersion}
-	for _, skill := range byKey {
+	for _, k := range keys {
+		skill := byKey[k]
 		slices.Sort(skill.Agents)
 		out.Skills = append(out.Skills, *skill)
 	}

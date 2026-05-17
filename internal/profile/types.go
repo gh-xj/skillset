@@ -114,18 +114,6 @@ func (p Profile) Normalized() Profile {
 		}
 		out.Skills = append(out.Skills, normalized)
 	}
-	slices.SortFunc(out.Skills, func(a, b Skill) int {
-		for _, cmp := range []int{
-			strings.Compare(a.Name, b.Name),
-			strings.Compare(string(a.Tier), string(b.Tier)),
-			strings.Compare(a.Source, b.Source),
-		} {
-			if cmp != 0 {
-				return cmp
-			}
-		}
-		return 0
-	})
 	return out
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gh-xj/skillset/internal/planner"
 	"github.com/gh-xj/skillset/internal/profile"
 	"github.com/gh-xj/skillset/internal/state"
+	"github.com/gh-xj/skillset/internal/testskill"
 )
 
 func TestRunDryRunDoesNotWriteState(t *testing.T) {
@@ -84,6 +85,15 @@ func newAdoptEnv(t *testing.T) adoptEnv {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
+	}
+	if err := testskill.WriteSkill(filepath.Join(env.home, ".agents", "skills", "opencli-browser"), "opencli-browser"); err != nil {
+		t.Fatalf("write github skill: %v", err)
+	}
+	if err := testskill.WriteGitHubLock(filepath.Join(env.home, ".agents", "skills"), "opencli-browser", "jackwener/opencli", "skills/opencli-browser/SKILL.md"); err != nil {
+		t.Fatalf("write github lock: %v", err)
+	}
+	if err := testskill.WriteSkill(filepath.Join(env.profileDir, "sources", "skill-builder"), "skill-builder"); err != nil {
+		t.Fatalf("write local skill: %v", err)
 	}
 	if err := os.Symlink(filepath.Join(env.profileDir, "sources", "skill-builder"), filepath.Join(env.home, ".agents", "skills", "skill-builder")); err != nil {
 		t.Fatalf("symlink local skill: %v", err)
