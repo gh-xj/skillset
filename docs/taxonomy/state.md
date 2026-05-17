@@ -31,3 +31,5 @@ profile and does not make unknown filesystem entries safe to delete.
 
 New state writes prefer `target_rel`, resolved at runtime under the configured
 agent/tier root. Older `target_path` entries still load for compatibility.
+When source URI syntax changes but resolves to the same desired source and
+target, `prune` must treat the managed entry as still desired rather than stale.

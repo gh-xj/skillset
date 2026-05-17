@@ -133,6 +133,11 @@ skillset prune --apply
 skillset check
 ```
 
+After changing `roots:`, local source syntax, or migrating a profile, run the
+real profile through `check`, `diff`, and `prune` dry-run before any
+`prune --apply`. A clean `check` does not by itself prove old managed state is
+safe to prune.
+
 Stop if the dry-run output includes anything unexpected. `prune --apply`
 should delete only entries that are:
 
